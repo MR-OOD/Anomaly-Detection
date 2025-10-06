@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from lightning.pytorch.loggers import CSVLogger
 
 from anomalib.data import Folder
 from anomalib.models import Fastflow
+from anomalib.metrics.evaluator import Evaluator
 from radimagenet_utils import load_radimagenet_resnet_weights
 
 
@@ -86,6 +88,17 @@ def main() -> None:
     )
 
     model = _build_model(args.backbone, args.radimagenet_ckpt)
+    if hasattr(model, "evaluator") and isinstance(model.evaluator, Evaluator):
+        if hasattr(model.evaluator, "pixel_metrics"):
+            model.evaluator.pixel_metrics = torch.nn.ModuleList([])
+
+        original_configure = getattr(model, "configure_callbacks", None)
+
+        def _configure_callbacks_without_evaluator():
+            callbacks = original_configure() if callable(original_configure) else []
+            return [cb for cb in callbacks if not isinstance(cb, Evaluator)]
+
+        model.configure_callbacks = _configure_callbacks_without_evaluator
 
     if args.gpu >= 0 and torch.cuda.is_available():
         accelerator = "gpu"
@@ -102,6 +115,26 @@ def main() -> None:
     )
 
     trainer.fit(model=model, datamodule=datamodule)
+
+    log_dir = None
+    logger = getattr(trainer, "logger", None)
+    if logger is not None and getattr(logger, "log_dir", None):
+        log_dir = Path(logger.log_dir)
+    if log_dir is None:
+        log_dir = Path(args.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = log_dir / "training_run_metadata.json"
+    epochs_completed = trainer.current_epoch + 1 if trainer.current_epoch is not None else args.epochs
+    metadata = {
+        "data_root": str(data_root.resolve()),
+        "backbone": args.backbone,
+        "radimagenet_ckpt": args.radimagenet_ckpt,
+        "epochs_target": args.epochs,
+        "epochs_completed": epochs_completed,
+    }
+    with metadata_path.open("w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
 
 
 if __name__ == "__main__":

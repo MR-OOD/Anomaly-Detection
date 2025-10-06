@@ -16,12 +16,16 @@ Each dataset root is expected to follow the anomalib folder convention:
   train/
     good/
       img/*.png
+      label/*.png
+
   valid/                
     good/img/*.png
+    good/label/*.png
     Ungood/img/*.png
     Ungood/label/*.png  
   test/                 
     good/img/*.png
+    good/label/*.png
     Ungood/img/*.png
     Ungood/label/*.png
 ```
@@ -42,7 +46,7 @@ Both scripts share a similar CLI:
 
 ## Training CFlow on PNGs
 
-`new_train_cflow.py` runs CFlow with PNG inputs using anomalib’s `Folder` datamodule.
+`train_cflow.py` runs CFlow with PNG inputs using anomalib’s `Folder` datamodule.
 
 Example command:
 
@@ -61,12 +65,12 @@ python new_train_cflow.py \
 
 ## Training FastFlow on PNGs with Pixel Metrics
 
-`new_train_fastflow.py` provides a streamlined FastFlow trainer. It automatically looks for anomaly masks in `label/` directories to enable pixel-level evaluation.
+`train_fastflow.py` provides a streamlined FastFlow trainer. It automatically looks for anomaly masks in `label/` directories to enable pixel-level evaluation.
 
 Example command:
 
 ```
-python new_train_fastflow.py \
+python train_fastflow.py \
   --data_root /local/scratch/koepchen/synth23_pelvis_v6_png/synth23_pelvis_v6_png \
   --backbone radimagenet_resnet50 \
   --radimagenet_ckpt RadImageNet_pytorch/ResNet50.pt \

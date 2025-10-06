@@ -1,5 +1,7 @@
 import argparse
 import os
+import json
+
 from pathlib import Path
 
 import torch
@@ -101,6 +103,27 @@ def main() -> None:
     )
 
     trainer.fit(model=model, datamodule=datamodule)
+
+    log_dir = None
+    logger = getattr(trainer, "logger", None)
+    if logger is not None and getattr(logger, "log_dir", None):
+        log_dir = Path(logger.log_dir)
+    if log_dir is None:
+        log_dir = Path(args.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = log_dir / "training_run_metadata.json"
+    epochs_completed = trainer.current_epoch + 1 if trainer.current_epoch is not None else args.epochs
+    metadata = {
+        "data_root": str(data_root.resolve()),
+        "backbone": args.backbone,
+        "radimagenet_ckpt": args.radimagenet_ckpt,
+        "epochs_target": args.epochs,
+        "epochs_completed": epochs_completed,
+    }
+    with metadata_path.open("w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
+
 
 
 if __name__ == "__main__":
