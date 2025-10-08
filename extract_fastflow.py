@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from lightning.pytorch import Trainer
 from PIL import Image
+from torch.nn import functional as F
 
 from train_fastflow import _build_model, _resolve_eval_dirs  # reuse existing helpers
 
@@ -25,6 +26,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--radimagenet_ckpt", type=str, default=None, help="Optional RadImageNet checkpoint.")
     parser.add_argument("--gpu", type=int, default=-1, help="GPU index to use; -1 for CPU.")
     parser.add_argument("--mask_threshold", type=float, default=0.5, help="Threshold for generating prediction masks when the model does not supply one.")
+    parser.add_argument("--map_size", type=int, default=224, help="Spatial size (height/width) for saved anomaly maps and masks.")
     return parser.parse_args()
 
 
@@ -174,6 +176,7 @@ def main() -> None:
 
     saved = 0
     threshold = args.mask_threshold
+    target_size = (args.map_size, args.map_size)
 
     for batch_outputs in predictions:
         if batch_outputs is None:
@@ -191,6 +194,13 @@ def main() -> None:
             anomaly_tensor = anomaly_tensor.squeeze(1)
         if anomaly_tensor.ndim == 4 and anomaly_tensor.shape[0] == 1:
             anomaly_tensor = anomaly_tensor.squeeze(0)
+        if anomaly_tensor.ndim == 3 and anomaly_tensor.shape[-2:] != target_size:
+            anomaly_tensor = F.interpolate(
+                anomaly_tensor.unsqueeze(1),
+                size=target_size,
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(1)
 
         if pred_masks is not None:
             mask_tensor = torch.as_tensor(pred_masks).detach().cpu()
@@ -198,6 +208,12 @@ def main() -> None:
                 mask_tensor = mask_tensor.squeeze(1)
             if mask_tensor.ndim == 4 and mask_tensor.shape[0] == 1:
                 mask_tensor = mask_tensor.squeeze(0)
+            if mask_tensor.ndim == 3 and mask_tensor.shape[-2:] != target_size:
+                mask_tensor = F.interpolate(
+                    mask_tensor.unsqueeze(1).to(torch.float32),
+                    size=target_size,
+                    mode="nearest",
+                ).squeeze(1)
         else:
             mask_tensor = (anomaly_tensor >= threshold).to(torch.uint8)
 
@@ -210,15 +226,20 @@ def main() -> None:
                 mask = mask_tensor[idx].numpy()
             except Exception:
                 continue
+            image_path_obj = Path(path_str)
+            try:
+                rel_image_path = image_path_obj.relative_to(data_root)
+            except ValueError:
+                rel_image_path = Path(image_path_obj.name)
 
-            stem = Path(path_str).stem
-            map_name = f"{stem}_anomaly_map.npy"
-            mask_name = f"{stem}_pred_mask.png"
+            stem = image_path_obj.stem
+            map_rel_path = rel_image_path.parent / f"{stem}_anomaly_map.npy"
+            mask_rel_path = rel_image_path.parent / f"{stem}_pred_mask.png"
 
-            map_path = maps_dir / map_name
-            mask_path = masks_dir / mask_name
-            mirror_map_path = mirror_maps / map_name
-            mirror_mask_path = mirror_masks / mask_name
+            map_path = maps_dir / map_rel_path
+            mask_path = masks_dir / mask_rel_path
+            mirror_map_path = mirror_maps / map_rel_path
+            mirror_mask_path = mirror_masks / mask_rel_path
 
             for path in (map_path.parent, mirror_map_path.parent, mask_path.parent, mirror_mask_path.parent):
                 path.mkdir(parents=True, exist_ok=True)

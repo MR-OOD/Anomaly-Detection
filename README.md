@@ -105,3 +105,68 @@ Both scripts reuse `radimagenet_utils.py` to remap RadImageNet state dicts to st
 - FastFlow’s evaluator requires masks only when pixel metrics are enabled; absence of `label/` directories will disable pixel metrics automatically inside anomalib.
 
 For more advanced usage (additional callbacks, mixed precision, distributed training), treat these scripts as starting points and extend them with standard Lightning components.
+
+## Exporting FastFlow Anomaly Maps
+
+After training, use `extract_fastflow.py` to run inference on a split and export per-image anomaly maps as `.npy` files:
+
+```
+python extract_fastflow.py \
+  --data_root /local/scratch/koepchen/synth23_pelvis_v8_png \
+  --checkpoint fastflow/synth23_pelvis_v8_png_fastflow/weights/best.ckpt \
+  --output_dir extracted_anomaly_maps_fastflow \
+  --split test \
+  --batch_size 8 \
+  --gpu 0 \
+  --map_size 224
+```
+
+The script reconstructs the dataset layout under `--output_dir`, saving `<image>_anomaly_map.npy` beneath `anomaly_maps/<split>/.../img/` and matching prediction masks as PNGs. Use `--map_size` to control the exported spatial resolution (default 224) and `--metadata` if you need a manifest of the generated files.
+
+## Post-processing FastFlow Outputs
+
+Run `apply_bodymask_fastflow.py` to multiply anomaly maps with anatomical body masks and optionally create visual summaries:
+
+```
+python apply_bodymask_fastflow.py \
+  --anomaly-dir extracted_anomaly_maps_fastflow/anomaly_maps \
+  --body-mask-dir /local/scratch/koepchen/synth23_pelvis_v8_png \
+  --output-dir postprocessed_anomaly_maps \
+  --path-replace anomaly_maps:test \
+  --path-replace img:bodymask \
+  --image-dir /local/scratch/koepchen/synth23_pelvis_v8_png \
+  --image-replace anomaly_maps:test \
+  --comparison-dir comparisons_fastflow \
+  --overlay-dir overlays_fastflow \
+  --comparison-cmap magma \
+  --overlay-alpha 0.6
+```
+
+- `--anomaly-dir`: Root of the exported anomaly maps (respects their relative subfolders).  
+- `--body-mask-dir`: Root of the dataset containing the body-mask folders; combine with `--path-replace` to swap components (e.g. `anomaly_maps` → `test` and `img` → `bodymask`).  
+- `--output-dir`: Destination for masked maps; set `--skip-missing` to ignore slices without masks.  
+- `--image-dir` / `--image-replace`: Required for visualisations—point to the original images so panels/overlays can be produced.  
+- `--comparison-dir`: Writes side-by-side PNGs (image, anomaly map, masked anomaly map).  
+- `--overlay-dir`: Stores RGB overlays of the heatmaps blended onto the original anatomy (`--overlay-alpha` controls the blend).  
+
+A summary line reports how many anomaly maps were processed and where masked maps, comparison panels, and overlays were written.
+
+If you already have masked anomaly maps and only need the visualisations, run the same command with `--masked-dir postprocessed_anomaly_maps/test` and omit `--body-mask-dir`. The script will reuse the existing masked arrays, producing comparison panels and overlays without reapplying the body mask.
+
+## Visualising Processed Anomaly Maps
+
+When you only need the qualitative before/after views, use `visualize_processed_anomaly_maps.py`:
+
+```
+python visualize_processed_anomaly_maps.py \
+  --anomaly-dir extracted_anomaly_maps_fastflow/anomaly_maps \
+  --masked-dir postprocessed_anomaly_maps/test \
+  --image-dir /local/scratch/koepchen/synth23_pelvis_v8_png \
+  --image-replace anomaly_maps:test \
+  --comparison-dir comparisons_fastflow \
+  --overlay-dir overlays_fastflow \
+  --comparison-cmap magma \
+  --overlay-alpha 0.6
+```
+
+This CLI wraps the visualisation branch directly: it compares each original anomaly map with its masked counterpart, writing the same comparison panels and overlays without touching the underlying data.

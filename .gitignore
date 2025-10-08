@@ -1,0 +1,10 @@
+__pycache__/
+/extracted_anomaly_maps_fastflow/
+/fastflow/
+/fastflow_logs/
+/maps_fastflow/
+/comparisons_fastflow/
+/images/
+/maps_fastflow/
+/overlays_fastflow/
+/postprocessed_anomaly_maps/
