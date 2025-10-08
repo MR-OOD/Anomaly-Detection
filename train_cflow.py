@@ -1,11 +1,12 @@
 import argparse
 import os
 import json
-
+import shutil
 from pathlib import Path
 
 import torch
 from lightning.pytorch import Trainer
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 
 from anomalib.models.image.cflow import Cflow
@@ -86,6 +87,32 @@ def main() -> None:
         extensions=(".png",),
     )
 
+    log_root = Path(args.log_dir)
+    project_root = Path(__file__).resolve().parent
+    dataset_tag = f"{data_root.name}_cflow"
+
+    lightning_log_dir = log_root / "cflow_logs"
+    project_log_dir = project_root / "cflow_logs"
+    for destination in (lightning_log_dir, project_log_dir):
+        destination.mkdir(parents=True, exist_ok=True)
+
+    weight_dirs = [
+        log_root / "cflow" / dataset_tag / "weights",
+        project_root / "cflow" / dataset_tag / "weights",
+    ]
+    for weights_path in weight_dirs:
+        weights_path.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=str(weight_dirs[0]),
+        filename="best",
+        monitor="train_loss_step",
+        mode="min",
+        save_top_k=1,
+        save_last=True,
+        auto_insert_metric_name=False,
+    )
+
     model = _build_model(args.backbone, args.radimagenet_ckpt)
 
     if args.gpu >= 0 and torch.cuda.is_available():
@@ -100,29 +127,82 @@ def main() -> None:
         accelerator=accelerator,
         devices=devices,
         logger=CSVLogger(save_dir=args.log_dir, name="cflow_logs"),
+        callbacks=[checkpoint_callback],
     )
 
     trainer.fit(model=model, datamodule=datamodule)
 
-    log_dir = None
-    logger = getattr(trainer, "logger", None)
-    if logger is not None and getattr(logger, "log_dir", None):
-        log_dir = Path(logger.log_dir)
-    if log_dir is None:
-        log_dir = Path(args.log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    if trainer.is_global_zero:
+        log_dir = None
+        logger = getattr(trainer, "logger", None)
+        if logger is not None and getattr(logger, "log_dir", None):
+            log_dir = Path(logger.log_dir)
+        if log_dir is None:
+            log_dir = Path(args.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata_path = log_dir / "training_run_metadata.json"
-    epochs_completed = trainer.current_epoch + 1 if trainer.current_epoch is not None else args.epochs
-    metadata = {
-        "data_root": str(data_root.resolve()),
-        "backbone": args.backbone,
-        "radimagenet_ckpt": args.radimagenet_ckpt,
-        "epochs_target": args.epochs,
-        "epochs_completed": epochs_completed,
-    }
-    with metadata_path.open("w", encoding="utf-8") as metadata_file:
-        json.dump(metadata, metadata_file, indent=2)
+        try:
+            relative_log_dir = log_dir.relative_to(lightning_log_dir)
+        except ValueError:
+            relative_log_dir = Path(log_dir.name)
+
+        project_run_dir = project_log_dir / relative_log_dir
+        project_run_dir.mkdir(parents=True, exist_ok=True)
+
+        best_checkpoint = checkpoint_callback.best_model_path
+        best_checkpoint_path = Path(best_checkpoint) if best_checkpoint else None
+
+        last_checkpoint = checkpoint_callback.last_model_path
+        last_checkpoint_path = Path(last_checkpoint) if last_checkpoint else weight_dirs[0] / "last.ckpt"
+        if not last_checkpoint_path.exists():
+            trainer.save_checkpoint(str(last_checkpoint_path))
+
+        project_best_checkpoint_path: Path | None = None
+        if best_checkpoint_path and best_checkpoint_path.exists():
+            project_best_checkpoint_path = weight_dirs[1] / best_checkpoint_path.name
+            try:
+                shutil.copy2(best_checkpoint_path, project_best_checkpoint_path)
+            except OSError:
+                project_best_checkpoint_path = None
+
+        project_last_checkpoint_path: Path | None = None
+        if last_checkpoint_path.exists():
+            project_last_checkpoint_path = weight_dirs[1] / last_checkpoint_path.name
+            try:
+                shutil.copy2(last_checkpoint_path, project_last_checkpoint_path)
+            except OSError:
+                project_last_checkpoint_path = None
+
+        metadata_path = log_dir / "training_run_metadata.json"
+        epochs_completed = trainer.current_epoch + 1 if trainer.current_epoch is not None else args.epochs
+
+        metadata = {
+            "data_root": str(data_root.resolve()),
+            "backbone": args.backbone,
+            "radimagenet_ckpt": args.radimagenet_ckpt,
+            "epochs_target": args.epochs,
+            "epochs_completed": epochs_completed,
+            "checkpoint_dir": str(weight_dirs[0].resolve()),
+            "project_checkpoint_dir": str(weight_dirs[1].resolve()),
+            "last_checkpoint": str(last_checkpoint_path.resolve()) if last_checkpoint_path.exists() else None,
+            "project_last_checkpoint": str(project_last_checkpoint_path.resolve())
+            if project_last_checkpoint_path and project_last_checkpoint_path.exists()
+            else None,
+            "best_checkpoint": str(best_checkpoint_path.resolve())
+            if best_checkpoint_path and best_checkpoint_path.exists()
+            else None,
+            "project_best_checkpoint": str(project_best_checkpoint_path.resolve())
+            if project_best_checkpoint_path and project_best_checkpoint_path.exists()
+            else None,
+        }
+        with metadata_path.open("w", encoding="utf-8") as metadata_file:
+            json.dump(metadata, metadata_file, indent=2)
+
+        project_metadata_path = project_run_dir / metadata_path.name
+        try:
+            shutil.copy2(metadata_path, project_metadata_path)
+        except OSError:
+            pass
 
 
 
