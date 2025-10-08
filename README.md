@@ -15,13 +15,13 @@ Each dataset root is expected to follow the anomalib folder convention:
 <data_root>/
   train/
     good/*.png
-    bodymask/*.png              # optional whole-body masks aligned with training frames
+    bodymask/*.png              
 
   valid/
     good/
       img/*.png
-      label/*.png               # optional anomaly masks
-      bodymask/*.png            # optional whole-body masks
+      label/*.png              
+      bodymask/*.png          
     Ungood/
       img/*.png
       label/*.png
@@ -70,8 +70,8 @@ python new_train_cflow.py \
 ```
 
 - CSV metrics land in `<log_dir>/cflow_logs/version_*/metrics.csv`.
-- Lightning’s default checkpointing continues to write into `<log_dir>/cflow_logs/version_*/checkpoints/` when validation is configured.
-- A dedicated `ModelCheckpoint` mirrors the reference pipeline by keeping `best.ckpt` (lowest `train_loss_step`) and `last.ckpt` in both `<log_dir>/cflow/<dataset_name>_cflow/weights/` (global log root) and `<repo_root>/cflow/<dataset_name>_cflow/weights/`. Run metadata is saved to `<log_dir>/cflow_logs/version_*/training_run_metadata.json` and copied to `<repo_root>/cflow_logs/version_*/`.
+- Lightning’s internal checkpointing still places files under `<log_dir>/cflow_logs/version_*/checkpoints/` (best by `val_loss` plus `last.ckpt` when validation runs).
+- After training the script copies `last.ckpt` (and `best.ckpt` when available) to `<log_dir>/cflow/<dataset_name>_cflow/weights/` and dumps run metadata as `<log_dir>/cflow_logs/version_*/training_run_metadata.json`.
 
 ## Training FastFlow on PNGs with Pixel Metrics
 
@@ -89,46 +89,14 @@ python train_fastflow.py \
   --gpu_ids 0,1
 ```
 
-- The default Lightning checkpointing policy applies (saves best `val_loss` and the latest weights inside `<log_dir>/fastflow_logs/version_*/checkpoints/`). If you prefer a custom location or metric, add or edit the `ModelCheckpoint` callback in the script.
+The default Lightning checkpointing policy applies (saves best `val_loss` and the latest weights inside `<log_dir>/fastflow_logs/version_*/checkpoints/`). If you prefer a custom location or metric, add a `ModelCheckpoint` callback in the script.
 - CSV metrics land in `<log_dir>/fastflow_logs/version_*/metrics.csv`.
-- To mirror the fuller pipeline, an explicit `ModelCheckpoint` stores `best.ckpt` (lowest `train_loss_step`) and `last.ckpt` under both `<log_dir>/fastflow/<dataset_name>_fastflow/weights/` and `<repo_root>/fastflow/<dataset_name>_fastflow/weights/`. Metadata JSONs are kept at `<log_dir>/fastflow_logs/version_*/training_run_metadata.json` and mirrored to `<repo_root>/fastflow_logs/version_*/`.
+- Lightning still writes default checkpoints under `<log_dir>/fastflow_logs/version_*/checkpoints/` based on `val_loss` (when available).
+- Additional convenience copies of the latest/best FastFlow weights are written to `<log_dir>/fastflow/<dataset_name>_fastflow/weights/`. The accompanying metadata JSON is stored as `<log_dir>/fastflow_logs/version_*/training_run_metadata.json`.
 
 ## RadImageNet Weight Loading
 
 Both scripts reuse `radimagenet_utils.py` to remap RadImageNet state dicts to standard torchvision ResNet module names before loading them into the anomalib models. Provide the `.pt` file via `--radimagenet_ckpt` or skip the flag to train from scratch.
-
-## Exporting FastFlow Anomaly Maps
-
-After training, use `test_fastflow.py` to run inference on a split and export per-image anomaly maps as `.npy` files:
-
-```
-python test_fastflow.py \
-  --data_root /local/scratch/koepchen/synth23_pelvis_v8_png \
-  --checkpoint fastflow/synth23_pelvis_v8_png_fastflow/weights/best.ckpt \
-  --output_dir ./fastflow_anomaly_maps \
-  --split test \
-  --batch_size 8 \
-  --gpu 0
-```
-
-The script reuses the training helpers to construct the datamodule, loads the specified checkpoint, and saves `<image_stem>_anomaly_map.npy` files under `--output_dir/anomaly_maps/` (with PNG prediction masks under `--output_dir/prediction_masks/`). Each result is also mirrored into `maps_fastflow/<split>/anomaly_maps/` and `maps_fastflow/<split>/prediction_masks/` for easy downstream use.
-
-## Post-processing FastFlow Outputs
-
-After inference, apply the anatomical body masks to the exported FastFlow anomaly maps before running downstream metrics. Use `fastflow_postprocess.py`:
-
-```
-python fastflow_postprocess.py \
-  --anomaly-dir /path/to/raw_anomaly_maps \
-  --body-mask-dir /local/scratch/koepchen/synth23_pelvis_v8_png/test/Ungood/bodymask \
-  --output-dir ./postprocessed_anomaly_maps \
-  --path-replace img:bodymask
-```
-
-- Supply the directory that contains the raw anomaly maps (`--anomaly-dir`) and the body-mask tree (`--body-mask-dir`).  
-- `--path-replace` rewrites path components when body masks live in a sibling folder (e.g. replace `img` with `bodymask`). Pass it multiple times if you need several substitutions.
-- The script preserves the relative layout while writing masked maps to `--output-dir`. By default it stops if a body mask is missing; add `--skip-missing` to emit warnings instead.
-- Provide `--image-dir` (and optional `--image-replace`) together with `--comparison-dir` to generate side-by-side panels showing the original image, the raw anomaly map, and the masked anomaly map using the chosen colormap.
 
 ## Notes
 
