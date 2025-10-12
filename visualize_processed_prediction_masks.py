@@ -7,36 +7,61 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-from PIL import Image
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+from fastflow_postprocess import (
+    apply_replacements,
+    canonical_suffix,
+    load_array,
+    load_image_as_rgb,
+    normalise_for_display,
+    parse_replacements,
+    project_to_2d,
+)
+
+PREDICTION_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tif",
+    ".tiff",
+    ".bmp",
+    ".npy",
+    ".npz",
+    ".nii",
+    ".nii.gz",
+}
+DATA_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tif",
+    ".tiff",
+    ".bmp",
+    ".nii",
+    ".nii.gz",
+}
 
 
 def _normalize(arr: np.ndarray) -> np.ndarray:
-    arr = arr.astype(np.float32)
-    min_val = arr.min() if arr.size else 0.0
-    max_val = arr.max() if arr.size else 1.0
-    if max_val <= min_val:
-        return np.zeros_like(arr, dtype=np.float32)
-    return (arr - min_val) / (max_val - min_val)
+    return normalise_for_display(arr)
 
 
 def _load_mask(path: Path) -> np.ndarray:
-    img = Image.open(path).convert("F")
-    data = np.array(img, dtype=np.float32)
-    if data.max(initial=0.0) > 1.0:
-        data /= 255.0
-    return data
+    array = load_array(path)
+    data = array.data.astype(np.float32, copy=False)
+    if np.issubdtype(array.dtype, np.integer):
+        max_val = np.iinfo(array.dtype).max
+        if max_val > 0:
+            data = data / float(max_val)
+    else:
+        max_val = float(np.max(np.abs(data))) if data.size else 1.0
+        if max_val > 0:
+            data = data / max_val
+    return project_to_2d(data)
 
 
 def _parse_component_replacements(items: Iterable[str]) -> dict[str, str]:
-    replacements: dict[str, str] = {}
-    for item in items:
-        if ":" not in item:
-            raise ValueError(f"Invalid replacement '{item}'. Expected SRC:DST.")
-        src, dst = item.split(":", 1)
-        replacements[src] = dst
-    return replacements
+    return parse_replacements(items)
 
 
 def _binary_outline(mask: np.ndarray, threshold: float, thickness: int) -> np.ndarray:
@@ -135,8 +160,7 @@ def save_panel(
         plt.close(fig)
         return
 
-    image = Image.open(image_path).convert("RGB")
-    image_arr = np.array(image, dtype=np.float32) / 255.0
+    image_arr = load_image_as_rgb(image_path)
 
     raw_overlay = _overlay_outlines(
         image_arr, raw, outline_color, outline_alpha, outline_threshold, outline_thickness
@@ -225,13 +249,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _apply_replacements(relative: Path, replacements: dict[str, str]) -> Path:
-    if not replacements:
-        return relative
-    parts = [replacements.get(part, part) for part in relative.parts]
-    return Path(*parts)
-
-
 def _candidate_mask_relatives(relative: Path) -> list[Path]:
     """Generate filenames that could correspond to a masked prediction."""
     parent = relative.parent
@@ -246,8 +263,17 @@ def _candidate_mask_relatives(relative: Path) -> list[Path]:
     else:
         stem_variants.extend([f"{first}_pred_mask", f"{first}_anomaly_map"])
 
-    alt_exts = {relative.suffix.lower(), ".png"}
-    alt_exts.update(IMAGE_EXTENSIONS)
+    alt_exts = {
+        canonical_suffix(relative),
+        relative.suffix.lower(),
+        ".png",
+        ".npy",
+        ".npz",
+        ".nii",
+        ".nii.gz",
+    }
+    alt_exts.update(PREDICTION_EXTENSIONS)
+    alt_exts = {ext for ext in alt_exts if ext}
 
     candidates: list[Path] = []
     seen: set[Path] = set()
@@ -284,7 +310,12 @@ def _candidate_image_relatives(relative: Path) -> list[Path]:
     else:
         stem_variants.append(f"{first}_pred_mask")
 
-    alt_exts = IMAGE_EXTENSIONS | {relative.suffix.lower()}
+    alt_exts = {
+        canonical_suffix(relative),
+        relative.suffix.lower(),
+    }
+    alt_exts.update(DATA_IMAGE_EXTENSIONS)
+    alt_exts = {ext for ext in alt_exts if ext}
     candidates: list[Path] = []
     seen: set[Path] = set()
     for stem in stem_variants:
@@ -317,8 +348,10 @@ def _candidate_ground_truth_relatives(relative: Path) -> list[Path]:
         ]
     )
 
-    alt_exts = set(IMAGE_EXTENSIONS)
+    alt_exts = set(PREDICTION_EXTENSIONS)
+    alt_exts.add(canonical_suffix(relative))
     alt_exts.add(relative.suffix.lower())
+    alt_exts = {ext for ext in alt_exts if ext}
 
     candidates: list[Path] = []
     seen: set[Path] = set()
@@ -348,7 +381,7 @@ def _resolve_ground_truth_path(
     candidate_relatives: list[Path] = []
     seen_relatives: set[Path] = set()
     for rel in relative_forms:
-        replaced = _apply_replacements(rel, replacements)
+        replaced = apply_replacements(rel, replacements)
         for candidate in _candidate_ground_truth_relatives(replaced):
             if candidate not in seen_relatives:
                 seen_relatives.add(candidate)
@@ -378,7 +411,7 @@ def _resolve_image_path(
     candidate_relatives: list[Path] = []
     seen_relatives: set[Path] = set()
     for rel in relative_forms:
-        replaced = _apply_replacements(rel, replacements)
+        replaced = apply_replacements(rel, replacements)
         for candidate in _candidate_image_relatives(replaced):
             if candidate not in seen_relatives:
                 seen_relatives.add(candidate)
@@ -418,7 +451,9 @@ def main() -> None:
         ground_truth_replacements = {"img": "label", **ground_truth_replacements}
 
     raw_files = [
-        path for path in args.raw_dir.rglob("*") if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+        path
+        for path in args.raw_dir.rglob("*")
+        if path.is_file() and canonical_suffix(path) in PREDICTION_EXTENSIONS
     ]
     if not raw_files:
         raise FileNotFoundError(f"No prediction masks found in {args.raw_dir}.")

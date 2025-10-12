@@ -73,11 +73,11 @@ python new_train_cflow.py \
 - Lightning’s internal checkpointing still places files under `<log_dir>/cflow_logs/version_*/checkpoints/` (best by `val_loss` plus `last.ckpt` when validation runs).
 - After training the script copies `last.ckpt` (and `best.ckpt` when available) to `<log_dir>/cflow/<dataset_name>_cflow/weights/` and dumps run metadata as `<log_dir>/cflow_logs/version_*/training_run_metadata.json`.
 
-## Training FastFlow on PNGs with Pixel Metrics
+## Training FastFlow on PNG or NIfTI Data
 
-`train_fastflow.py` provides a streamlined FastFlow trainer. It automatically looks for anomaly masks in `label/` directories to enable pixel-level evaluation.
+`train_fastflow.py` provides a streamlined FastFlow trainer. It automatically looks for anomaly masks in `label/` directories to enable pixel-level evaluation and now understands datasets stored either as PNGs or NIfTI volumes. When NIfTI files are detected the script mirrors the dataset into a PNG cache so the existing anomalib pipeline continues to work.
 
-Example command:
+Example command (PNG dataset):
 
 ```
 python train_fastflow.py \
@@ -88,6 +88,22 @@ python train_fastflow.py \
   --batch_size 32 \
   --gpu_ids 0,1
 ```
+
+Example command (NIfTI dataset):
+
+```
+python train_fastflow.py \
+  --data_root /local/scratch/koepchen/synth23_pelvis_v8_nifti \
+  --dataset-format nifti \
+  --conversion-cache-dir /local/scratch/koepchen/fastflow_png_cache \
+  --backbone radimagenet_resnet50 \
+  --radimagenet_ckpt RadImageNet_pytorch/ResNet50.pt \
+  --epochs 50 \
+  --batch_size 32 \
+  --gpu_ids 0,1
+```
+
+Use `--dataset-format` to override automatic detection (`auto`, `png`, or `nifti`) and `--conversion-cache-dir` to control where the PNG mirror is written. The cache directory is reused on subsequent runs unless the source data changes.
 
 The default Lightning checkpointing policy applies (saves best `val_loss` and the latest weights inside `<log_dir>/fastflow_logs/version_*/checkpoints/`). If you prefer a custom location or metric, add a `ModelCheckpoint` callback in the script.
 - CSV metrics land in `<log_dir>/fastflow_logs/version_*/metrics.csv`.
@@ -108,11 +124,13 @@ For more advanced usage (additional callbacks, mixed precision, distributed trai
 
 ## Exporting FastFlow Anomaly Maps
 
-After training, use `extract_fastflow.py` to run inference on a split and export per-image anomaly maps as `.npy` files:
+After training, use `extract_fastflow.py` to run inference on a split and export per-image anomaly maps as `.npy` files. The CLI mirrors the dataset conversion logic from the trainer, so you can point it to PNG or NIfTI datasets interchangeably.
 
 ```
 python extract_fastflow.py \
-  --data_root /local/scratch/koepchen/synth23_pelvis_v8_png \
+  --data_root /local/scratch/koepchen/synth23_pelvis_v8_nifti \
+  --dataset-format nifti \
+  --conversion-cache-dir /local/scratch/koepchen/fastflow_png_cache \
   --checkpoint fastflow/synth23_pelvis_v8_png_fastflow/weights/best.ckpt \
   --output_dir extracted_anomaly_maps_fastflow \
   --split test \
@@ -121,7 +139,9 @@ python extract_fastflow.py \
   --map_size 224
 ```
 
-The script reconstructs the dataset layout under `--output_dir`, saving `<image>_anomaly_map.npy` beneath `anomaly_maps/<split>/.../img/` and matching prediction masks as PNGs. Use `--map_size` to control the exported spatial resolution (default 224) and `--metadata` if you need a manifest of the generated files.
+The script reconstructs the dataset layout under `--output_dir`, saving `<image>_anomaly_map.npy` beneath `anomaly_maps/<split>/.../img/` and matching prediction masks as PNGs. Use `--map_size` to control the exported spatial resolution (default 224).
+Pass `--mask-output-format nifti` if you prefer the prediction masks in `.nii.gz` form instead of PNG.
+If you have older exports that need tidying, add `--repair-layout` to re-organise existing files into the dataset’s `good/Ungood` folder structure after extraction.
 
 ## Post-processing FastFlow Outputs
 
@@ -137,8 +157,8 @@ python apply_bodymask_fastflow.py \
   --prediction-mask-dir prediction_masks_fastflow
 ```
 
-- `--anomaly-dir`: Root of the exported anomaly maps (respects their relative subfolders).  
-- `--body-mask-dir`: Root of the dataset containing the body-mask folders; combine with `--path-replace` to swap components (e.g. `anomaly_maps` → `test` and `img` → `bodymask`).  
+- `--anomaly-dir`: Root of the exported anomaly maps (respects their relative subfolders). Inputs can be PNG images, NumPy arrays (`.npy`/`.npz`), or NIfTI volumes (`.nii`/`.nii.gz`).  
+- `--body-mask-dir`: Root of the dataset containing the body-mask folders; combine with `--path-replace` to swap components (e.g. `anomaly_maps` → `test` and `img` → `bodymask`). Body masks may also live in PNG/NumPy/NIfTI formats.  
 - `--output-dir`: Destination for masked anomaly maps; set `--skip-missing` to ignore slices without masks.  
 - `--prediction-mask-dir`: Applies the body mask to existing prediction masks and writes the result to this directory. Adjust `--raw-prediction-dir` if the raw masks live outside the default `prediction_masks/` tree.
 
@@ -162,7 +182,7 @@ python visualize_processed_anomaly_maps.py \
   --overlay-alpha 0.6
 ```
 
-This CLI handles the visualisation (comparison panels and overlays) without modifying the anomaly maps or prediction masks.
+This CLI handles the visualisation (comparison panels and overlays) without modifying the anomaly maps or prediction masks. PNG, NumPy, and NIfTI inputs are detected automatically for both the anomaly maps and the source images.
 
 ## Exporting Prediction Masks
 
@@ -192,4 +212,4 @@ python visualize_processed_prediction_masks.py \
   --overlay-alpha 0.6
 ```
 
-Provide `--image-dir`/`--image-replace` if you want overlay panels; otherwise the script produces side-by-side PNGs showing raw vs. body-masked masks without touching the underlying data.
+Provide `--image-dir`/`--image-replace` if you want overlay panels; otherwise the script produces side-by-side PNGs showing raw vs. body-masked masks without touching the underlying data. Raw/masked/ground-truth masks can be stored as PNG, NumPy arrays, or NIfTI volumes, and dataset images can likewise be in PNG or NIfTI format.

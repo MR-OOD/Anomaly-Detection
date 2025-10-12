@@ -14,11 +14,12 @@ from lightning.pytorch.loggers import CSVLogger
 from anomalib.data import Folder
 from anomalib.models import Fastflow
 from anomalib.metrics.evaluator import Evaluator
+from fastflow_dataset import prepare_dataset_root
 from radimagenet_utils import load_radimagenet_resnet_weights
 
 
 DEFAULT_DATA_ROOT = "/local/scratch/koepchen/synth23_pelvis_v8_png"
-DEFAULT_LOG_DIR = "/home/user/koepchen/OOD_tests"
+DEFAULT_LOG_DIR = "/home/user/koepchen/post_processing/Post-Processing-Pipeline"
 
 
 def _build_model(backbone: str, radimagenet_ckpt: str | None) -> Fastflow:
@@ -54,7 +55,7 @@ def _resolve_eval_dirs(root: Path) -> tuple[str, str, str | None]:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Minimal FastFlow training script (PNG only)")
+    parser = argparse.ArgumentParser(description="Minimal FastFlow training script for PNG or NIfTI datasets.")
     parser.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--log_dir", type=str, default=DEFAULT_LOG_DIR)
     parser.add_argument("--backbone", type=str, default="radimagenet_resnet50")
@@ -68,6 +69,19 @@ def _parse_args() -> argparse.Namespace:
         help="Comma separated GPU indices (e.g. '0,1'). Use 'cpu' to force CPU execution.",
     )
     parser.add_argument("--gpu", type=int, default=-1, help="(deprecated) Single GPU index; -1 forces CPU")
+    parser.add_argument(
+        "--dataset-format",
+        type=str,
+        choices={"auto", "png", "nifti"},
+        default="auto",
+        help="Input dataset format. Use 'nifti' to force conversion, 'png' to skip detection.",
+    )
+    parser.add_argument(
+        "--conversion-cache-dir",
+        type=str,
+        default=None,
+        help="Optional directory where converted PNG datasets will be stored when using NIfTI inputs.",
+    )
     return parser.parse_args()
 
 
@@ -108,17 +122,24 @@ def _determine_trainer_resources(gpu_ids_arg: str | None, gpu_arg: int) -> tuple
 def main() -> None:
     args = _parse_args()
 
-    data_root = Path(args.data_root)
-    if not data_root.exists():
-        raise FileNotFoundError(f"DATA_ROOT not found: {data_root}")
+    source_root = Path(args.data_root).resolve()
+    if not source_root.exists():
+        raise FileNotFoundError(f"DATA_ROOT not found: {source_root}")
+
+    cache_dir = Path(args.conversion_cache_dir).resolve() if args.conversion_cache_dir else None
+    prepared_root, converted = prepare_dataset_root(
+        source_root, format_hint=args.dataset_format, cache_root=cache_dir
+    )
+    if converted:
+        print(f"[INFO] Converted NIfTI dataset at {source_root} -> PNG cache at {prepared_root}")
 
     os.environ.setdefault("ANOMALIB_LOG_DIR", args.log_dir)
 
-    normal_test_dir, abnormal_dir, mask_dir = _resolve_eval_dirs(data_root)
+    normal_test_dir, abnormal_dir, mask_dir = _resolve_eval_dirs(prepared_root)
 
     datamodule = Folder(
-        name=f"{data_root.name}_fastflow",
-        root=str(data_root),
+        name=f"{source_root.name}_fastflow",
+        root=str(prepared_root),
         normal_dir="train/good",
         normal_test_dir=normal_test_dir,
         abnormal_dir=abnormal_dir,
@@ -131,7 +152,7 @@ def main() -> None:
 
     log_root = Path(args.log_dir)
     project_root = Path(__file__).resolve().parent
-    dataset_tag = f"{data_root.name}_fastflow"
+    dataset_tag = f"{source_root.name}_fastflow"
 
     lightning_log_dir = log_root / "fastflow_logs"
     project_log_dir = project_root / "fastflow_logs"
@@ -228,7 +249,8 @@ def main() -> None:
         metadata_path = log_dir / "training_run_metadata.json"
         epochs_completed = trainer.current_epoch + 1 if trainer.current_epoch is not None else args.epochs
         metadata = {
-            "data_root": str(data_root.resolve()),
+            "data_root": str(source_root),
+            "prepared_root": str(prepared_root),
             "backbone": args.backbone,
             "radimagenet_ckpt": args.radimagenet_ckpt,
             "epochs_target": args.epochs,

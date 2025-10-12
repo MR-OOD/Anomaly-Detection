@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
+import nibabel as nib
 import torch
 from lightning.pytorch import Trainer
 from PIL import Image
 from torch.nn import functional as F
 
+from fastflow_dataset import prepare_dataset_root
 from train_fastflow import _build_model, _resolve_eval_dirs  # reuse existing helpers
 
 
@@ -27,6 +29,31 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu", type=int, default=-1, help="GPU index to use; -1 for CPU.")
     parser.add_argument("--mask_threshold", type=float, default=0.5, help="Threshold for generating prediction masks when the model does not supply one.")
     parser.add_argument("--map_size", type=int, default=224, help="Spatial size (height/width) for saved anomaly maps and masks.")
+    parser.add_argument(
+        "--dataset-format",
+        type=str,
+        choices={"auto", "png", "nifti"},
+        default="auto",
+        help="Input dataset format. Use 'nifti' to force conversion, 'png' to skip detection.",
+    )
+    parser.add_argument(
+        "--conversion-cache-dir",
+        type=Path,
+        default=None,
+        help="Optional directory where converted PNG datasets will be stored when using NIfTI inputs.",
+    )
+    parser.add_argument(
+        "--mask-output-format",
+        type=str,
+        choices={"png", "nifti"},
+        default="png",
+        help="File format used when saving prediction masks.",
+    )
+    parser.add_argument(
+        "--repair-layout",
+        action="store_true",
+        help="Reorganise existing outputs into dataset-style folders after extraction.",
+    )
     return parser.parse_args()
 
 
@@ -39,6 +66,27 @@ def _coerce_list(obj: Sequence | str | None) -> list[str]:
             flattened.extend(_coerce_list(item))
         return flattened
     return [str(obj)]
+
+
+def _derive_output_relative_path(rel_image_path: Path, split: str) -> Path:
+    """Recreate a dataset-style relative path rooted at <split>/<good|Ungood>/..."""
+    parts = list(rel_image_path.parts)
+    label_idx = next((idx for idx, part in enumerate(parts) if part.lower() in {"good", "ungood"}), None)
+    if label_idx is None:
+        # Fall back to preserving the existing layout under the split.
+        return Path(split) / rel_image_path
+
+    label = parts[label_idx]
+    suffix_parts = parts[label_idx + 1 :]
+
+    dest_parts: list[str] = [split, label]
+    if suffix_parts:
+        # Preserve subfolders such as img/, label/, etc.
+        dest_parts.extend(suffix_parts)
+    else:
+        dest_parts.append(rel_image_path.name)
+
+    return Path(*dest_parts)
 
 
 def _extract(outputs, keys: Iterable[str]):
@@ -89,6 +137,124 @@ def _resolve_split_dirs(root: Path, split: str) -> tuple[str, str, str | None]:
     return normal_test_dir, abnormal_dir, mask_dir
 
 
+def _normalize_stem(path: Path) -> str:
+    name = path.name
+    if name.endswith(".nii.gz"):
+        return name[: -len(".nii.gz")]
+    return path.stem
+
+
+def _index_dataset_stems(data_root: Path, split: str) -> dict[str, tuple[str, Path]]:
+    """Map base stem -> (label, relative dataset path) for quick lookup."""
+    split_root = data_root / split
+    index: dict[str, tuple[str, Path]] = {}
+
+    def register(path: Path) -> None:
+        try:
+            relative_to_split = path.relative_to(split_root)
+        except ValueError:
+            return
+        parts = relative_to_split.parts
+        if not parts:
+            return
+        label = parts[0]
+        if label not in {"good", "Ungood"}:
+            return
+        stem = _normalize_stem(path)
+        if stem not in index or ("img" in relative_to_split.parts and "img" not in index[stem][1].parts):
+            index[stem] = (label, path.relative_to(split_root / label))
+
+    for label in ("good", "Ungood"):
+        img_dir = split_root / label / "img"
+        if img_dir.exists():
+            for file in img_dir.iterdir():
+                if file.is_file():
+                    register(file)
+
+    for label in ("good", "Ungood"):
+        label_root = split_root / label
+        if label_root.exists():
+            for file in label_root.rglob("*"):
+                if file.is_file():
+                    register(file)
+
+    return index
+
+
+def _derive_destination_path(
+    category: str,
+    filename: str,
+    index: dict[str, tuple[str, Path]],
+    split: str,
+) -> tuple[Path | None, str | None]:
+    suffix_map = {
+        "anomaly_maps": ["_anomaly_map.npy", "_anomaly_map.npz", "_anomaly_map.nii.gz", "_anomaly_map.nii"],
+        "prediction_masks": ["_pred_mask.npy", "_pred_mask.npz", "_pred_mask.nii.gz", "_pred_mask.nii", "_pred_mask.png"],
+    }
+    base_name = None
+    for suffix in suffix_map.get(category, []):
+        if filename.endswith(suffix):
+            base_name = filename[: -len(suffix)]
+            break
+    if base_name is None:
+        base_name = Path(filename).stem
+
+    if base_name not in index:
+        return None, base_name
+
+    label, rel_dataset = index[base_name]
+    parent = rel_dataset.parent
+    dest_parts = [split, label]
+    if str(parent) != ".":
+        dest_parts.append(str(parent))
+    dest = Path(*dest_parts) / filename
+    return dest, None
+
+
+def reorganize_existing_outputs(output_root: Path, data_root: Path, split: str) -> None:
+    """Move previously exported files into dataset-like good/Ungood folders."""
+    index = _index_dataset_stems(data_root, split)
+    if not index:
+        print(f"[WARN] Unable to index dataset stems under {data_root}/{split}; skipping reorganisation.")
+        return
+
+    relocated = 0
+    skipped: list[str] = []
+    for category in ("anomaly_maps", "prediction_masks"):
+        category_base = output_root / category
+        split_root = category_base / split
+        if not split_root.exists():
+            continue
+
+        for file_path in list(split_root.rglob("*")):
+            if file_path.is_dir():
+                continue
+            rel_parts = file_path.relative_to(split_root).parts
+            if any(part in {"good", "Ungood"} for part in rel_parts):
+                continue
+            destination_rel, missing_key = _derive_destination_path(category, file_path.name, index, split)
+            if destination_rel is None:
+                skipped.append(missing_key or file_path.stem)
+                continue
+            destination_path = category_base / destination_rel
+            if destination_path == file_path:
+                continue
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            if destination_path.exists():
+                destination_path.unlink()
+            file_path.rename(destination_path)
+            relocated += 1
+
+    if relocated:
+        print(f"[INFO] Relocated {relocated} files into dataset-style folders under {output_root}")
+    if skipped:
+        unique_skipped = sorted(set(skipped))
+        print(
+            f"[WARN] Unable to determine destination for {len(unique_skipped)} files (example: {unique_skipped[:5]}). "
+            "They were left in their original location."
+        )
+
+
 def _prepare_datamodule(args: argparse.Namespace):
     from anomalib.data import Folder
 
@@ -99,7 +265,7 @@ def _prepare_datamodule(args: argparse.Namespace):
         normal_test_dir, abnormal_dir, mask_dir = _resolve_eval_dirs(data_root)
 
     return Folder(
-        name=f"{args.data_root.name}_fastflow_{args.split}",
+        name=f"{args.dataset_name}_fastflow_{args.split}",
         root=str(args.data_root),
         normal_dir="train/good",
         normal_test_dir=normal_test_dir,
@@ -109,6 +275,8 @@ def _prepare_datamodule(args: argparse.Namespace):
         eval_batch_size=args.batch_size,
         num_workers=8,
         extensions=(".png",),
+        val_split_mode="none",
+        test_split_mode="from_dir",
     )
 
 
@@ -140,6 +308,17 @@ def main() -> None:
     data_root = Path(args.data_root).resolve()
     if not data_root.exists():
         raise FileNotFoundError(f"DATA_ROOT not found: {data_root}")
+
+    args.original_data_root = data_root
+    cache_root = args.conversion_cache_dir.resolve() if args.conversion_cache_dir else None
+    prepared_root, converted = prepare_dataset_root(
+        data_root, format_hint=args.dataset_format, cache_root=cache_root
+    )
+    if converted:
+        print(f"[INFO] Converted NIfTI dataset at {data_root} -> PNG cache at {prepared_root}")
+
+    args.dataset_name = data_root.name
+    args.data_root = prepared_root
 
     datamodule = _prepare_datamodule(args)
     model = _load_model(args)
@@ -230,11 +409,21 @@ def main() -> None:
             try:
                 rel_image_path = image_path_obj.relative_to(data_root)
             except ValueError:
-                rel_image_path = Path(image_path_obj.name)
+                original_root = getattr(args, "original_data_root", None)
+                if original_root is not None:
+                    try:
+                        rel_image_path = image_path_obj.relative_to(original_root)
+                    except ValueError:
+                        rel_image_path = Path(image_path_obj.name)
+                else:
+                    rel_image_path = Path(image_path_obj.name)
 
+            destination_rel = _derive_output_relative_path(rel_image_path, args.split)
             stem = image_path_obj.stem
-            map_rel_path = rel_image_path.parent / f"{stem}_anomaly_map.npy"
-            mask_rel_path = rel_image_path.parent / f"{stem}_pred_mask.png"
+            dest_parent = destination_rel.parent
+            map_rel_path = dest_parent / f"{stem}_anomaly_map.npy"
+            mask_extension = ".png" if args.mask_output_format == "png" else ".nii.gz"
+            mask_rel_path = dest_parent / f"{stem}_pred_mask{mask_extension}"
 
             map_path = maps_dir / map_rel_path
             mask_path = masks_dir / mask_rel_path
@@ -247,15 +436,23 @@ def main() -> None:
             np.save(map_path, anomaly_map)
             np.save(mirror_map_path, anomaly_map)
 
-            mask_arr = mask.astype(np.uint8)
-            if mask_arr.max() <= 1:
-                mask_arr = mask_arr * 255
-            mask_img = Image.fromarray(mask_arr)
-            mask_img.save(mask_path)
-            mask_img.save(mirror_mask_path)
+            if args.mask_output_format == "png":
+                mask_arr = mask.astype(np.uint8)
+                if mask_arr.max() <= 1:
+                    mask_arr = mask_arr * 255
+                mask_img = Image.fromarray(mask_arr)
+                mask_img.save(mask_path)
+                mask_img.save(mirror_mask_path)
+            else:
+                mask_arr = mask.astype(np.float32)
+                nifti_mask = nib.Nifti1Image(mask_arr, affine=np.eye(4))
+                nib.save(nifti_mask, mask_path)
+                nib.save(nifti_mask, mirror_mask_path)
             saved += 1
 
     print(f"[INFO] Saved anomaly maps and prediction masks for {saved} samples to {output_root}")
+    if args.repair_layout:
+        reorganize_existing_outputs(output_root, args.original_data_root, args.split)
 
 
 if __name__ == "__main__":
