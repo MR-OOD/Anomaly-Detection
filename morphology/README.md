@@ -79,8 +79,8 @@ Results are saved to:
 
 **Tuning Stage**: Parameter optimization on pred masks of **Fastflow**
 
-![Comparison](../images/comparison.png)
-![Summary](../images/table.png)
+![Comparison](../results/comparison.png)
+![Summary](../results/table.png)
 
 
 **Next Steps**:
