@@ -108,6 +108,7 @@ def _resolve_split_dirs(root: Path, split: str) -> tuple[str, str, str | None]:
 
 def _prepare_datamodule(args: argparse.Namespace):
     from anomalib.data import Folder
+    from anomalib.data.utils.split import TestSplitMode, ValSplitMode
 
     data_root = Path(args.data_root)
     try:
@@ -126,6 +127,10 @@ def _prepare_datamodule(args: argparse.Namespace):
         eval_batch_size=args.batch_size,
         num_workers=8,
         extensions=(".png",),
+        test_split_mode=TestSplitMode.FROM_DIR,
+        val_split_mode=ValSplitMode.NONE,
+        test_split_ratio=0.0,
+        val_split_ratio=0.0,
     )
 
 
