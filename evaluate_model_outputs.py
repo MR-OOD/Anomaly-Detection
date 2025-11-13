@@ -72,10 +72,16 @@ def _parse_patient_id(relative_path: str) -> str:
     return stem.rsplit("_", 1)[0]
 
 
+def _is_anomalous_relative_path(relative_path: str) -> bool:
+    """Return True if the relative path belongs to an Ungood case."""
+    parts = [part.lower() for part in Path(relative_path).parts]
+    return "ungood" in parts
+
+
 def _compute_mean_positive_fraction_metrics(
     per_slice: list[SliceRecord],
     thresholds: list[float],
-) -> tuple[list[dict[str, float]], dict[str, Any]]:
+) -> tuple[list[dict[str, float]], dict[str, Any], dict[str, list[dict[str, Any]]]]:
     patient_fractions: dict[str, list[float]] = defaultdict(list)
     patient_gt_positive: dict[str, bool] = defaultdict(bool)
 
@@ -98,8 +104,7 @@ def _compute_mean_positive_fraction_metrics(
         patient_id = _parse_patient_id(record.relative_path)
         patient_fractions[patient_id].append(fraction)
 
-        gt_positive_pixels = (record.true_positives or 0) + (record.false_negatives or 0)
-        if gt_positive_pixels > 0:
+        if _is_anomalous_relative_path(record.relative_path):
             patient_gt_positive[patient_id] = True
 
     patient_mean_fraction: dict[str, float] = {}
@@ -112,6 +117,26 @@ def _compute_mean_positive_fraction_metrics(
         "num_patients_gt_positive": sum(1 for value in patient_gt_positive.values() if value),
         "mean_fraction_by_patient": patient_mean_fraction,
     }
+
+    patient_threshold_details: dict[str, list[dict[str, Any]]] = {}
+    for patient_id, mean_fraction in patient_mean_fraction.items():
+        gt_positive = patient_gt_positive.get(patient_id, False)
+        per_threshold: list[dict[str, Any]] = []
+        for threshold in thresholds:
+            pred_positive = mean_fraction >= threshold
+            tpr = None
+            if gt_positive:
+                tpr = 1.0 if pred_positive else 0.0
+            per_threshold.append(
+                {
+                    "threshold": threshold,
+                    "mean_positive_fraction": mean_fraction,
+                    "predicted_positive": pred_positive,
+                    "ground_truth_positive": gt_positive,
+                    "true_positive_rate": tpr,
+                }
+            )
+        patient_threshold_details[patient_id] = per_threshold
 
     metrics_per_threshold: list[dict[str, float]] = []
     for threshold in thresholds:
@@ -141,6 +166,7 @@ def _compute_mean_positive_fraction_metrics(
                 "threshold": threshold,
                 "precision": precision,
                 "recall": recall,
+                "true_positive_rate": recall,
                 "dice_score": dice,
                 "false_negative_rate": fnr,
                 "balanced_accuracy": balanced_accuracy,
@@ -151,7 +177,7 @@ def _compute_mean_positive_fraction_metrics(
             }
         )
 
-    return metrics_per_threshold, summary
+    return metrics_per_threshold, summary, patient_threshold_details
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -214,7 +240,9 @@ def evaluate_outputs(
     )
 
     image_metrics = _compute_image_level_metrics(per_slice)
-    mean_fraction_metrics, patient_summary = _compute_mean_positive_fraction_metrics(per_slice, mean_fraction_thresholds)
+    mean_fraction_metrics, patient_summary, patient_threshold_details = _compute_mean_positive_fraction_metrics(
+        per_slice, mean_fraction_thresholds
+    )
 
     if print_summary:
         print("Pixel-level metrics:")
@@ -242,16 +270,29 @@ def evaluate_outputs(
                 f"  α_mean={metrics['threshold']:.4f} → "
                 f"P={_format_metric(metrics['precision'])}, "
                 f"R={_format_metric(metrics['recall'])}, "
+                f"TPR={_format_metric(metrics['true_positive_rate'])}, "
                 f"Dice={_format_metric(metrics['dice_score'])}, "
                 f"FNR={_format_metric(metrics['false_negative_rate'])}, "
                 f"BA={_format_metric(metrics['balanced_accuracy'])}"
             )
+        if patient_threshold_details:
+            print()
+            print("Per-patient true positive rates by threshold:")
+            for patient_id in sorted(patient_threshold_details):
+                entries = patient_threshold_details[patient_id]
+                formatted = []
+                for entry in entries:
+                    tpr_value = entry["true_positive_rate"]
+                    tpr_str = _format_metric(tpr_value)
+                    formatted.append(f"α={entry['threshold']:.4f}:{tpr_str}")
+                print(f"  {patient_id}: {' | '.join(formatted)}")
 
     return {
         "pixel_metrics": pixel_metrics,
         "slice_image_metrics": image_metrics,
         "patient_mean_fraction_metrics": mean_fraction_metrics,
         "patient_summary": patient_summary,
+        "patient_threshold_details": patient_threshold_details,
         "per_slice": per_slice,
     }
 
@@ -279,6 +320,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "slice_image_metrics": results["slice_image_metrics"],
             "patient_mean_fraction_metrics": results["patient_mean_fraction_metrics"],
             "patient_summary": results["patient_summary"],
+            "patient_threshold_details": results["patient_threshold_details"],
             "per_slice": [asdict(record) for record in results["per_slice"]],
         }
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
