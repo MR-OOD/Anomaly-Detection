@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
-import nibabel as nib
 import torch
 from lightning.pytorch import Trainer
 from PIL import Image
@@ -41,13 +40,6 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Optional directory where converted PNG datasets will be stored when using NIfTI inputs.",
-    )
-    parser.add_argument(
-        "--mask-output-format",
-        type=str,
-        choices={"png", "nifti"},
-        default="png",
-        help="File format used when saving prediction masks.",
     )
     parser.add_argument(
         "--repair-layout",
@@ -422,8 +414,7 @@ def main() -> None:
             stem = image_path_obj.stem
             dest_parent = destination_rel.parent
             map_rel_path = dest_parent / f"{stem}_anomaly_map.npy"
-            mask_extension = ".png" if args.mask_output_format == "png" else ".nii.gz"
-            mask_rel_path = dest_parent / f"{stem}_pred_mask{mask_extension}"
+            mask_rel_path = dest_parent / f"{stem}_pred_mask.png"
 
             map_path = maps_dir / map_rel_path
             mask_path = masks_dir / mask_rel_path
@@ -436,18 +427,12 @@ def main() -> None:
             np.save(map_path, anomaly_map)
             np.save(mirror_map_path, anomaly_map)
 
-            if args.mask_output_format == "png":
-                mask_arr = mask.astype(np.uint8)
-                if mask_arr.max() <= 1:
-                    mask_arr = mask_arr * 255
-                mask_img = Image.fromarray(mask_arr)
-                mask_img.save(mask_path)
-                mask_img.save(mirror_mask_path)
-            else:
-                mask_arr = mask.astype(np.float32)
-                nifti_mask = nib.Nifti1Image(mask_arr, affine=np.eye(4))
-                nib.save(nifti_mask, mask_path)
-                nib.save(nifti_mask, mirror_mask_path)
+            mask_arr = mask.astype(np.uint8)
+            if mask_arr.max() <= 1:
+                mask_arr = mask_arr * 255
+            mask_img = Image.fromarray(mask_arr)
+            mask_img.save(mask_path)
+            mask_img.save(mirror_mask_path)
             saved += 1
 
     print(f"[INFO] Saved anomaly maps and prediction masks for {saved} samples to {output_root}")
