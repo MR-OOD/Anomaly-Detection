@@ -70,6 +70,20 @@ def apply_body_mask(
         for base in mask_search_roots:
             base_mask_path = base / relative
             candidates.append(base_mask_path)
+            # When dealing with full patient scans, allow fallback to the original Ungood masks.
+            lowered_parts = [part.lower() for part in base_mask_path.parts]
+            if "ungood_whole_patient_scans" in lowered_parts:
+                replacement_parts = []
+                replaced = False
+                for part in base_mask_path.parts:
+                    if not replaced and part.lower() == "ungood_whole_patient_scans":
+                        replacement_parts.append("Ungood")
+                        replaced = True
+                    else:
+                        replacement_parts.append(part)
+                fallback_path = Path(*replacement_parts)
+                if fallback_path not in candidates:
+                    candidates.append(fallback_path)
 
             stem_variants = {base_mask_path.stem}
             base_stem = base_mask_path.stem

@@ -20,6 +20,7 @@ from fastflow_postprocess import (
 from morphology.slice_metrics import aggregate_slice_metrics, compute_slice_metrics
 
 VALID_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".npy", ".npz", ".nii", ".nii.gz"}
+NEGATIVE_FOLDERS = {"good", "ungood_whole_patient_scans"}
 
 
 def _parse_replacements(raw_items: Iterable[str]) -> dict[str, str]:
@@ -61,6 +62,11 @@ def _candidate_ground_truth_relatives(relative: Path) -> list[Path]:
     return candidates
 
 
+def _should_synthesize_negative_mask(relative: Path) -> bool:
+    parts = {part.lower() for part in relative.parts}
+    return bool(parts & NEGATIVE_FOLDERS)
+
+
 def _resolve_ground_truth_path(
     ground_truth_root: Path,
     prediction_relative: Path,
@@ -69,12 +75,25 @@ def _resolve_ground_truth_path(
     replaced = apply_replacements(prediction_relative, replacements) if replacements else prediction_relative
     candidates_rel = _candidate_ground_truth_relatives(replaced)
     candidates: list[Path] = []
+    root_name = ground_truth_root.name.lower()
+
     for rel in candidates_rel:
         candidate = ground_truth_root / rel
         candidates.append(candidate)
         if candidate.exists():
             return candidate, candidates
+
+        # If the relative path already starts with the root name (e.g. “test/...”),
+        # drop that component so we don’t get /…/test/test/...
+        parts = rel.parts
+        if parts and parts[0].lower() == root_name:
+            alt = ground_truth_root / Path(*parts[1:])
+            candidates.append(alt)
+            if alt.exists():
+                return alt, candidates
+
     return None, candidates
+
 
 
 def _prepare_array(array: np.ndarray, threshold: float | None) -> np.ndarray:
@@ -127,16 +146,26 @@ def compute_metrics(
 
     for pred_path in prediction_files:
         relative = pred_path.relative_to(prediction_root)
+        parts = {part.lower() for part in relative.parts}
+        is_whole_patient = "Ungood_whole_patient_scans" in parts
+        is_true_anomaly = "Ungood" in parts and not is_whole_patient
+
         record = SliceRecord(relative_path=str(relative), ground_truth_path=None)
+
+        prediction_array = _prepare_array(load_array(pred_path).data, prediction_threshold)
 
         gt_path, candidates = _resolve_ground_truth_path(ground_truth_root, relative, replacements)
         if gt_path is None:
-            record.missing_ground_truth = True
-            per_slice.append(record)
-            continue
-
-        prediction_array = _prepare_array(load_array(pred_path).data, prediction_threshold)
-        ground_truth_array = _prepare_array(load_array(gt_path).data, ground_truth_threshold)
+            if _should_synthesize_negative_mask(relative):
+                ground_truth_array = np.zeros_like(prediction_array, dtype=np.uint8)
+                record.ground_truth_path = "__synthetic_zero_mask__"
+            else:
+                record.missing_ground_truth = True
+                per_slice.append(record)
+                continue
+        else:
+            ground_truth_array = _prepare_array(load_array(gt_path).data, ground_truth_threshold)
+            record.ground_truth_path = str(gt_path.relative_to(ground_truth_root))
 
         if prediction_array.shape != ground_truth_array.shape:
             raise ValueError(
@@ -152,7 +181,6 @@ def compute_metrics(
         )
         metrics_accumulator.append(metrics)
 
-        record.ground_truth_path = str(gt_path.relative_to(ground_truth_root))
         record.precision = metrics["precision"]
         record.recall = metrics["recall"]
         record.dice_score = metrics["f1_score"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from fastflow_postprocess import (
+from apply_bodymask_fastflow import (
     _parse_replacements,
     visualize_anomaly_pairs,
 )

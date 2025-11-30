@@ -50,6 +50,20 @@ def _gather_leaf_dirs(root: Path, extensions: Iterable[str]) -> list[Path]:
     return sorted(candidates, key=lambda item: str(item))
 
 
+def _infer_anomaly_map_dir(prediction_dir: Path) -> Path | None:
+    """Attempt to infer the anomaly-map directory from the prediction directory structure."""
+    parts = list(prediction_dir.parts)
+    for idx, part in enumerate(parts):
+        if part.lower() == "prediction_masks":
+            candidate_parts = parts.copy()
+            candidate_parts[idx] = "anomaly_maps"
+            candidate = Path(*candidate_parts)
+            if candidate.exists():
+                return candidate
+            break
+    return None
+
+
 def _run_body_mask_stage(
     input_dir: Path,
     body_mask_dir: Path,
@@ -216,6 +230,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Optional root containing ground-truth masks. When provided, corresponding 3D NIfTI volumes are created.",
     )
     parser.add_argument(
+        "--anomaly-map-dir",
+        type=Path,
+        default=None,
+        help="Optional directory with raw anomaly maps for AUROC benchmarking (defaults to auto-detection).",
+    )
+    parser.add_argument(
         "--mask-threshold",
         type=float,
         default=0.5,
@@ -322,6 +342,15 @@ def run_pipeline(args: argparse.Namespace) -> None:
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
+    anomaly_map_dir: Path | None = None
+    if args.anomaly_map_dir is not None:
+        anomaly_map_dir = args.anomaly_map_dir.resolve()
+    elif args.ground_truth_dir is not None:
+        inferred = _infer_anomaly_map_dir(input_dir)
+        if inferred is not None:
+            logger.info("Auto-detected anomaly-map directory for AUROC benchmarks: %s", inferred)
+            anomaly_map_dir = inferred
+
     # Normalise thresholds.
     mask_threshold = args.mask_threshold
     if mask_threshold > 1.0:
@@ -419,6 +448,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             ground_truth_threshold=args.metrics_ground_truth_threshold,
             mean_fraction_thresholds=args.metrics_mean_fraction_thresholds,
             print_summary=True,
+            anomaly_map_dir=anomaly_map_dir,
         )
 
         payload = {
@@ -427,6 +457,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             "patient_mean_fraction_metrics": evaluation["patient_mean_fraction_metrics"],
             "patient_summary": evaluation["patient_summary"],
             "per_slice": [asdict(record) for record in evaluation["per_slice"]],
+            "anomaly_auroc_metrics": evaluation["anomaly_auroc_metrics"],
         }
         metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         logger.info("Saved metrics summary to %s", metrics_path)

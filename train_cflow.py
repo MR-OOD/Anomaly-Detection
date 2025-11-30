@@ -9,8 +9,9 @@ from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 
-from anomalib.models.image.cflow import Cflow
 from anomalib.data import Folder
+from anomalib.models.image.cflow import Cflow
+from fastflow_dataset import prepare_dataset_root
 from radimagenet_utils import load_radimagenet_resnet_weights
 
 
@@ -21,7 +22,16 @@ DEFAULT_LOG_DIR = "/home/user/koepchen/OOD_tests"
 def _build_model(backbone: str, radimagenet_ckpt: str | None) -> Cflow:
     name = backbone.lower()
     suffix = name.replace("radimagenet", "").strip("-_ ") or "resnet50"
-    mapping = {"resnet50": "resnet50", "50": "resnet50", "resnet18": "resnet18", "18": "resnet18"}
+    mapping = {
+        "resnet50": "resnet50",
+        "50": "resnet50",
+        "resnet18": "resnet18",
+        "18": "resnet18",
+        "wideresnet50": "wide_resnet50_2",
+        "wideresnet50_2": "wide_resnet50_2",
+        "wide_resnet50_2": "wide_resnet50_2",
+        "wrn50": "wide_resnet50_2",
+    }
     target = mapping.get(suffix, suffix)
 
     model = Cflow(backbone=target, pre_trained=False)
@@ -52,7 +62,7 @@ def _resolve_eval_dirs(root: Path) -> tuple[str, str, str | None]:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Minimal CFlow training script (PNG only)")
+    parser = argparse.ArgumentParser(description="Minimal CFlow training script for PNG or NIfTI datasets.")
     parser.add_argument("--data_root", type=str, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--log_dir", type=str, default=DEFAULT_LOG_DIR)
     parser.add_argument("--backbone", type=str, default="radimagenet_resnet50")
@@ -60,23 +70,43 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--gpu", type=int, default=-1, help="GPU index to use; -1 forces CPU")
+    parser.add_argument(
+        "--dataset-format",
+        type=str,
+        choices={"auto", "png", "nifti"},
+        default="auto",
+        help="Input dataset format. Use 'nifti' to force conversion, 'png' to skip detection.",
+    )
+    parser.add_argument(
+        "--conversion-cache-dir",
+        type=str,
+        default=None,
+        help="Optional directory where converted PNG datasets will be stored when using NIfTI inputs.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
 
-    data_root = Path(args.data_root)
-    if not data_root.exists():
-        raise FileNotFoundError(f"DATA_ROOT not found: {data_root}")
+    source_root = Path(args.data_root).resolve()
+    if not source_root.exists():
+        raise FileNotFoundError(f"DATA_ROOT not found: {source_root}")
+
+    cache_dir = Path(args.conversion_cache_dir).resolve() if args.conversion_cache_dir else None
+    prepared_root, converted = prepare_dataset_root(
+        source_root, format_hint=args.dataset_format, cache_root=cache_dir
+    )
+    if converted:
+        print(f"[INFO] Converted NIfTI dataset at {source_root} -> PNG cache at {prepared_root}")
 
     os.environ.setdefault("ANOMALIB_LOG_DIR", args.log_dir)
 
-    normal_test_dir, abnormal_dir, mask_dir = _resolve_eval_dirs(data_root)
+    normal_test_dir, abnormal_dir, mask_dir = _resolve_eval_dirs(prepared_root)
 
     datamodule = Folder(
-        name=f"{data_root.name}_cflow",
-        root=str(data_root),
+        name=f"{source_root.name}_cflow",
+        root=str(prepared_root),
         normal_dir="train/good",
         normal_test_dir=normal_test_dir,
         abnormal_dir=abnormal_dir,
@@ -89,7 +119,7 @@ def main() -> None:
 
     log_root = Path(args.log_dir)
     project_root = Path(__file__).resolve().parent
-    dataset_tag = f"{data_root.name}_cflow"
+    dataset_tag = f"{source_root.name}_cflow"
 
     lightning_log_dir = log_root / "cflow_logs"
     project_log_dir = project_root / "cflow_logs"
@@ -177,7 +207,10 @@ def main() -> None:
         epochs_completed = trainer.current_epoch + 1 if trainer.current_epoch is not None else args.epochs
 
         metadata = {
-            "data_root": str(data_root.resolve()),
+            "data_root": str(source_root),
+            "prepared_root": str(prepared_root),
+            "dataset_format": args.dataset_format,
+            "conversion_cache_dir": str(cache_dir) if cache_dir else None,
             "backbone": args.backbone,
             "radimagenet_ckpt": args.radimagenet_ckpt,
             "epochs_target": args.epochs,

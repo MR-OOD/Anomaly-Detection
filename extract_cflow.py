@@ -11,20 +11,20 @@ from PIL import Image
 from torch.nn import functional as F
 
 from fastflow_dataset import prepare_dataset_root
-from train_fastflow import _build_model, _resolve_eval_dirs  # reuse existing helpers
+from train_cflow import _build_model, _resolve_eval_dirs
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract FastFlow anomaly maps and prediction masks.")
+    parser = argparse.ArgumentParser(description="Extract CFlow anomaly maps and prediction masks.")
     parser.add_argument("--data_root", type=Path, required=True, help="Dataset root to evaluate.")
-    parser.add_argument("--checkpoint", type=Path, required=True, help="Path to FastFlow checkpoint.")
+    parser.add_argument("--checkpoint", type=Path, required=True, help="Path to CFlow checkpoint.")
     parser.add_argument("--output_dir", type=Path, required=True, help="Directory to store outputs.")
     parser.add_argument("--split", type=str, default="test", choices={"test", "valid"}, help="Dataset split to use.")
     parser.add_argument("--batch_size", type=int, default=32, help="Prediction batch size.")
     parser.add_argument("--backbone", type=str, default="radimagenet_resnet50", help="Backbone identifier.")
     parser.add_argument("--radimagenet_ckpt", type=str, default=None, help="Optional RadImageNet checkpoint.")
     parser.add_argument("--gpu", type=int, default=-1, help="GPU index to use; -1 for CPU.")
-    parser.add_argument("--mask_threshold", type=float, default=0.5, help="Threshold for generating prediction masks when the model does not supply one.")
+    parser.add_argument("--mask_threshold", type=float, default=0.5, help="Fallback threshold for binary masks.")
     parser.add_argument(
         "--dataset-format",
         type=str,
@@ -130,7 +130,7 @@ def _prepare_datamodule(args: argparse.Namespace):
         normal_test_dir, abnormal_dir, mask_dir = _resolve_eval_dirs(data_root)
 
     return Folder(
-        name=f"{args.data_root.name}_fastflow_{args.split}",
+        name=f"{args.data_root.name}_cflow_{args.split}",
         root=str(args.data_root),
         normal_dir="train/good",
         normal_test_dir=normal_test_dir,
@@ -147,30 +147,11 @@ def _prepare_datamodule(args: argparse.Namespace):
     )
 
 
-def _derive_output_relative_path(rel_image_path: Path, split: str) -> Path:
-    """Recreate a dataset-style relative path rooted at <split>/<good|Ungood>/..."""
-    parts = list(rel_image_path.parts)
-    label_idx = next((idx for idx, part in enumerate(parts) if part.lower() in {"good", "ungood"}), None)
-    if label_idx is None:
-        return Path(split) / rel_image_path
-
-    label = parts[label_idx]
-    suffix_parts = parts[label_idx + 1 :]
-
-    dest_parts: list[str] = [split, label]
-    if suffix_parts:
-        dest_parts.extend(suffix_parts)
-    else:
-        dest_parts.append(rel_image_path.name)
-
-    return Path(*dest_parts)
-
-
 def _load_model(args: argparse.Namespace):
     try:
-        from anomalib.models import Fastflow
+        from anomalib.models.image.cflow import Cflow
 
-        return Fastflow.load_from_checkpoint(
+        return Cflow.load_from_checkpoint(
             checkpoint_path=str(args.checkpoint),
             backbone=args.backbone,
             strict=True,
@@ -232,7 +213,7 @@ def main() -> None:
     maps_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
 
-    mirror_root = Path("maps_fastflow") / args.split
+    mirror_root = Path("maps_cflow") / args.split
     mirror_maps = mirror_root / "anomaly_maps"
     mirror_masks = mirror_root / "prediction_masks"
     mirror_maps.mkdir(parents=True, exist_ok=True)
@@ -330,6 +311,24 @@ def main() -> None:
             saved += 1
 
     print(f"[INFO] Saved anomaly maps and prediction masks for {saved} samples to {output_root}")
+
+
+def _derive_output_relative_path(rel_image_path: Path, split: str) -> Path:
+    parts = list(rel_image_path.parts)
+    label_idx = next((idx for idx, part in enumerate(parts) if part.lower() in {"good", "ungood"}), None)
+    if label_idx is None:
+        return Path(split) / rel_image_path
+
+    label = parts[label_idx]
+    suffix_parts = parts[label_idx + 1 :]
+
+    dest_parts: list[str] = [split, label]
+    if suffix_parts:
+        dest_parts.extend(suffix_parts)
+    else:
+        dest_parts.append(rel_image_path.name)
+
+    return Path(*dest_parts)
 
 
 if __name__ == "__main__":
