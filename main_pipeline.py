@@ -440,6 +440,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         if "img" not in metrics_replacements:
             metrics_replacements = {"img": "label", **metrics_replacements}
 
+        print("\n[INFO] Metrics on POST-PROCESSED masks:")
         evaluation = evaluate_outputs(
             morph_dir,
             ground_truth_dir,
@@ -451,13 +452,39 @@ def run_pipeline(args: argparse.Namespace) -> None:
             anomaly_map_dir=anomaly_map_dir,
         )
 
+        print("\n[INFO] Metrics on RAW masks (pre post-processing):")
+        raw_evaluation = evaluate_outputs(
+            input_dir,
+            ground_truth_dir,
+            ground_truth_replacements=metrics_replacements,
+            prediction_threshold=args.metrics_prediction_threshold,
+            ground_truth_threshold=args.metrics_ground_truth_threshold,
+            mean_fraction_thresholds=args.metrics_mean_fraction_thresholds,
+            print_summary=True,
+            anomaly_map_dir=anomaly_map_dir,
+        )
+
         payload = {
-            "pixel_metrics": evaluation["pixel_metrics"],
-            "slice_image_metrics": evaluation["slice_image_metrics"],
-            "patient_mean_fraction_metrics": evaluation["patient_mean_fraction_metrics"],
-            "patient_summary": evaluation["patient_summary"],
-            "per_slice": [asdict(record) for record in evaluation["per_slice"]],
-            "anomaly_auroc_metrics": evaluation["anomaly_auroc_metrics"],
+            "post_processed": {
+                "source": "post_processed",
+                "prediction_dir": str(morph_dir),
+                "pixel_metrics": evaluation["pixel_metrics"],
+                "slice_image_metrics": evaluation["slice_image_metrics"],
+                "patient_mean_fraction_metrics": evaluation["patient_mean_fraction_metrics"],
+                "patient_summary": evaluation["patient_summary"],
+                "per_slice": [asdict(record) for record in evaluation["per_slice"]],
+                "anomaly_auroc_metrics": evaluation["anomaly_auroc_metrics"],
+            },
+            "raw_prediction": {
+                "source": "raw",
+                "prediction_dir": str(input_dir),
+                "pixel_metrics": raw_evaluation["pixel_metrics"],
+                "slice_image_metrics": raw_evaluation["slice_image_metrics"],
+                "patient_mean_fraction_metrics": raw_evaluation["patient_mean_fraction_metrics"],
+                "patient_summary": raw_evaluation["patient_summary"],
+                "per_slice": [asdict(record) for record in raw_evaluation["per_slice"]],
+                "anomaly_auroc_metrics": raw_evaluation["anomaly_auroc_metrics"],
+            },
         }
         metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         logger.info("Saved metrics summary to %s", metrics_path)
