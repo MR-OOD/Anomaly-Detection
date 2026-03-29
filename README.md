@@ -15,15 +15,22 @@ The pipeline refines raw model predictions in four stages:
 
 ## Evaluation
 
-Evaluation is run automatically on both the raw and post-processed masks and saved to `metrics/metrics_summary.json`. Metrics are computed at three levels of granularity — from individual pixels up to whole patients:
+Evaluation runs automatically on both the raw and post-processed masks and is saved to `metrics/metrics_summary.json`. Metrics are assessed at three levels of granularity — from individual pixels up to whole patients — to give a complete picture of model performance across spatial scales:
 
 ```mermaid
 flowchart TB
-    A["Post-processed Masks + Ground Truth Labels"]
+    IN(["🗂 Prediction Masks  ·  Ground Truth Labels"])
 
-    A --> B["🔲 Pixel Level\nPrecision · Recall · Dice · FNR · Balanced Accuracy\naggregated over all predicted pixels"]
-    A --> C["🖼 Slice Level\nEach 2D slice → positive if any anomaly pixel present\nPrecision · Recall · F1 · Balanced Accuracy"]
-    A --> D["🧍 Patient Level\nα_mean = mean positive pixel fraction across all slices\nclassified as anomalous if α_mean ≥ θ\nevaluated at θ ∈ {0.0, 0.02, 0.05, 0.1}"]
+    IN --> PX["<b>🔲 Pixel Level</b><br/><i>aggregated over all pixels</i><br/><br/>• Precision<br/>• Recall<br/>• Dice Score<br/>• False Negative Rate<br/>• Balanced Accuracy"]
+
+    IN --> SL["<b>🖼 Slice Level</b><br/><i>slice = positive if any<br/>anomaly pixel is present</i><br/><br/>• Precision<br/>• Recall<br/>• Dice Score<br/>• False Negative Rate<br/>• Balanced Accuracy"]
+
+    IN --> PT["<b>🧍 Patient Level</b><br/><i>α_mean = mean positive pixel<br/>fraction across all slices;<br/>patient flagged if α_mean ≥ θ</i><br/><br/>• Precision<br/>• Recall<br/>• Dice Score<br/>• False Negative Rate<br/>• Balanced Accuracy<br/>• θ ∈ {0.0, 0.02, 0.05, 0.1}"]
+
+    style IN fill:#2d3748,stroke:#718096,color:#f7fafc
+    style PX fill:#1a365d,stroke:#3182ce,color:#bee3f8
+    style SL fill:#1c4532,stroke:#38a169,color:#c6f6d5
+    style PT fill:#44337a,stroke:#805ad5,color:#e9d8fd
 ```
 
 ---
