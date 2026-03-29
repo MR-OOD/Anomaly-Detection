@@ -2,7 +2,7 @@
 
 Post-processing and evaluation for binary anomaly prediction masks produced by the detection models (FastFlow, CFlow). Takes raw prediction masks and body masks as input, applies body masking, morphological filtering, and a 3D persistence filter, then computes pixel-, slice-, and patient-level metrics.
 
-![Post-Processing Pipeline](image.png)
+![Post-Processing Pipeline](results/image.png)
 
 The pipeline refines raw model predictions in four stages:
 
@@ -196,13 +196,12 @@ Post-Processing-Pipeline/
 ├── evaluate_model_outputs.py               # Pixel/slice/patient metrics
 ├── compute_pixel_metrics.py                # Per-slice metric primitives
 │
-├── morphology/                             # Stages 2–3 + NIfTI reconstruction
+├── morphology/                             # Morphological processing + NIfTI reconstruction
 │   ├── processor.py                        # MorphologyProcessor, BatchProcessor
 │   ├── stack_to_3d.py                      # BatchNIfTIStacker (2D PNG → 3D NIfTI)
 │   ├── slice_metrics.py                    # Metric helpers
 │   ├── pipeline_tuning.py                  # Tuning pipeline logic
 │   ├── tune_morpho.py                      # Tuning entrypoint
-│   ├── apply_morpho.py                     # Standalone batch apply
 │   └── README.md                           # Detailed morphology documentation
 │
 ├── visualization/                          # Report and presentation figures
@@ -215,6 +214,11 @@ Post-Processing-Pipeline/
 │   └── morpho_val.yaml                     # Morphology tuning configuration
 │
 ├── results/                                # Report figures
+│   └── image.png                           # Pipeline overview diagram
+│
+├── old_code/
+│   └── apply_morpho.py                     # Legacy standalone batch apply (superseded by main_pipeline.py)
+│
 ├── requirements.txt
 └── README.md
 ```
