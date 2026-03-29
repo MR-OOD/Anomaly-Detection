@@ -2,6 +2,8 @@
 
 Post-processing and evaluation for binary anomaly prediction masks produced by the detection models (FastFlow, CFlow). Takes raw prediction masks and body masks as input, applies body masking, morphological filtering, and a 3D persistence filter, then computes pixel-, slice-, and patient-level metrics.
 
+![Post-Processing Pipeline](image.png)
+
 ---
 
 ## Input Structure
