@@ -10,10 +10,10 @@ Four controlled experiments were conducted:
 
 | # | Research Question | Approach |
 |---|---|---|
-| 1 | Which **anomaly detection model family** performs best for metallic implant detection in pelvic MR? | Benchmark 10 models across 5 families (Normalizing Flow, Knowledge Distillation, Memory Bank, One-Class, Reconstruction) on a shared PNG dataset with an ImageNet backbone |
-| 2 | How does **input channel representation** affect detection performance? | Compare three input formats for the best model: 2D PNG (bone colormap), NIfTI 3-channel replicated, and NIfTI 2.5D consecutive slices |
-| 3 | Does **domain-specific pre-training** improve anomaly detection? | Evaluate an ImageNet-pretrained WRN50 backbone vs. a RadImageNet-pretrained ResNet50 backbone on all three input formats |
-| 4 | How much does **post-processing** improve detection metrics? | Evaluate body masking, morphological closing, and 3D volumetric persistence filtering at pixel, slice, and patient level |
+| 1 | Which **anomaly detection model family** best identifies metallic implant artifacts in pelvic MR under standardized conditions? | Benchmark 10 models across 5 families (Reconstruction, Knowledge Distillation, Memory Bank, Normalizing Flow, One-Class) on replicated-channel NIfTI slices from a single center |
+| 2 | How does **input representation** affect anomaly detection — does synthetic color encoding or local 3D context improve localization over a plain replicated baseline? | Re-evaluate the best model per family across three input formats: replicated-channel NIfTI, bone colormap PNG, and 2.5D consecutive slices |
+| 3 | Does replacing an ImageNet backbone with a **RadImageNet backbone** improve anomaly detection for pelvic MR? | Swap the frozen WRN50 (ImageNet) encoder in FastFlow for a ResNet50 pretrained on RadImageNet; evaluate across all three input formats |
+| 4 | Do the best single-center configurations **generalize to a multi-center** setting with scanner and protocol variability? | Apply the top model–format combination per family from Exp 2 to a multi-center dataset (centers A + C) and compare against single-center performance |
 
 ```mermaid
 flowchart TD
@@ -21,22 +21,22 @@ flowchart TD
 
     subgraph EXP1["Exp 1 — Model Family Benchmark"]
         direction LR
-        E1["10 models · 5 families\nInput: PNG · Backbone: ImageNet WRN50"]
+        E1["10 models · 5 families\nInput: NIfTI replicated channels\nBackbone: ImageNet · Single center"]
     end
 
     subgraph EXP2["Exp 2 — Input Representation"]
         direction LR
-        E2["FastFlow\nPNG  ·  NIfTI-Rep  ·  NIfTI-Con\nBackbone: ImageNet WRN50"]
+        E2["Best model per family\nReplicated  ·  Bone Colormap  ·  2.5D Consecutive\nBackbone: ImageNet · Single center"]
     end
 
     subgraph EXP3["Exp 3 — Domain Pre-training"]
         direction LR
-        E3["FastFlow · all 3 input formats\nImageNet WRN50  vs  RadImageNet ResNet50"]
+        E3["FastFlow · all 3 input formats\nImageNet WRN50  vs  RadImageNet ResNet50\nSingle center"]
     end
 
-    subgraph EXP4["Exp 4 — Post-Processing Impact"]
+    subgraph EXP4["Exp 4 — Multi-Center Generalizability"]
         direction LR
-        E4["Best model configuration\nBody Mask → Morphology → 3D Persistence\nPixel · Slice · Patient metrics"]
+        E4["Best model–format per family from Exp 2\nSingle center  vs  Multi center (A + C)\nScanner & protocol variability"]
     end
 
     DS --> EXP1 --> EXP2 --> EXP3 --> EXP4
