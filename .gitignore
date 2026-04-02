@@ -96,3 +96,4 @@ filtered_metrics.json
 *.pyc
 *.pyo
 .ipynb_checkpoints/
+/model-training/datasets

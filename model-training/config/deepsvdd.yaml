@@ -10,13 +10,13 @@ model:
   ae_optimizer_name: adam
 
 train:
-  n_epochs: 2 # 300 
+  n_epochs:  300 
   batch_size: 200
   lr: 0.0001
   weight_decay: 0.5e-7
   lr_milestones: 50        # epochs at which to drop LR by 0.1
   ae_lr: 0.00001
-  ae_n_epochs: 2 #150
+  ae_n_epochs: 150
   ae_lr_milestone: 250
   ae_batch_size: 200
   ae_weight_decay: 0.5e-6

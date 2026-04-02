@@ -7,9 +7,9 @@ model:
   variant: 3way             # normal | scar | 3way
 
 train:
-  epochs: 1 # 64 #256
+  epochs: 64 #256
   batch_size: 16 #64
-  test_epochs: 1 # 10 
+  test_epochs:  10 
   workers: 8
   lr: 0.01
   optim: sgd            # sgd | adam
