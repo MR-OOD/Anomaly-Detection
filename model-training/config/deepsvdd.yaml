@@ -3,28 +3,28 @@
 
 model:
   name: deepsvdd
-  rep_dim: 128              # embedding dimension of the hypersphere space
-  pretrained: true          # use ImageNet-pre-trained ResNet18 encoder
+  pretrain: True          # ae pretraining
   objective: one-class      # one-class | soft-boundary
   nu: 0.1                   # soft-boundary hyperparameter (only used if objective=soft-boundary)
+  optimizer_name: adam
+  ae_optimizer_name: adam
 
 train:
-  epochs: 300
+  n_epochs: 2 # 300 
   batch_size: 200
-  num_workers: 8
   lr: 0.0001
-  weight_decay: 1.0e-6
-  lr_milestones: []         # epochs at which to drop LR by 0.1
-  warm_up_n_epochs: 10      # soft-boundary only: epochs before R updates
-  accelerator: gpu          # gpu | cpu | mps
+  weight_decay: 0.5e-7
+  lr_milestones: 50        # epochs at which to drop LR by 0.1
+  ae_lr: 0.00001
+  ae_n_epochs: 2 #150
+  ae_lr_milestone: 250
+  ae_batch_size: 200
+  ae_weight_decay: 0.5e-6
   gpu: 0                    # GPU index; -1 for CPU
   seed: 42
-  data_root: ./datasets/synth23_pelvis_v7_png
+  data_root: ./datasets/synth23_pelvis_v7_nifti
   output_root: ./results/deepsvdd
   name: ~                   # required: experiment name
 
-extract:
-  split: test               # test | valid
-  batch_size: 32
-  gpu: 0
+
   # checkpoint path is supplied via --checkpoint on the CLI

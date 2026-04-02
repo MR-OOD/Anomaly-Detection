@@ -1,228 +1,270 @@
 import os
 import numpy as np
-from PIL import Image
 import torch
-import random
 from torch.utils import data
-from torchvision.transforms import transforms
-import torchvision.transforms.functional as TF
-import pandas as pd
-from torch.utils.data import DataLoader
-import glob
+from torchvision import transforms
+from PIL import Image
+import nibabel as nib
+
 
 def get_train_transforms():
-    r'''
-    resize (224) -> tensor -> normalize
-    '''
-    transform = transforms.Compose([
-        transforms.Resize((32,32)),
+    return transforms.Compose([
+        transforms.Resize((32, 32)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
     ])
-    return transform
+
 
 def get_valid_transforms():
-    r'''
-    resize (224) -> tensor -> normalize
-    '''
-    transform = transforms.Compose([
-        transforms.Resize((32,32)),
+    return transforms.Compose([
+        transforms.Resize((32, 32)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
     ])
-    return transform
+
+
+def _is_supported_file(path):
+    lower = path.lower()
+    return lower.endswith((".png", ".jpg", ".jpeg", ".nii", ".nii.gz"))
+
+
+def _list_supported_files(folder):
+    return sorted([
+        f for f in os.listdir(folder)
+        if os.path.isfile(os.path.join(folder, f)) and _is_supported_file(f)
+    ])
+
+
+def _first_existing_dir(*paths):
+    for p in paths:
+        if os.path.isdir(p):
+            return p
+    raise FileNotFoundError(f"None of these directories exists: {paths}")
+
+
+def _resolve_base_root(data_root):
+    if not os.path.isdir(data_root):
+        raise FileNotFoundError(f"Dataset root does not exist: {data_root}")
+    return os.path.abspath(data_root)
+
+
+def load_nifti_image(path, transform=None):
+    lower = path.lower()
+
+    # ---------------------------
+    # Case 1: PNG / JPG
+    # ---------------------------
+    if lower.endswith(('.png', '.jpg', '.jpeg')):
+        img = Image.open(path).convert("RGB")
+        return transform(img) if transform else img
+
+    # ---------------------------
+    # Case 2: NIfTI
+    # ---------------------------
+    nifti_img = nib.load(path)
+    image = nifti_img.get_fdata()
+
+    if image.shape == (224, 224, 1, 3):
+        image = image[:, :, 0, :]
+    else:
+        raise ValueError(
+            f"Unsupported image shape: {image.shape}. Expected (224, 224, 1, 3)"
+        )
+
+    image_normalized = np.zeros_like(image)
+    for i in range(3):
+        slice_i = image[:, :, i]
+        slice_i = (slice_i - np.min(slice_i)) / (np.max(slice_i) - np.min(slice_i) + 1e-8) * 255
+        image_normalized[:, :, i] = slice_i
+
+    image = image_normalized.astype(np.uint8)
+    image_pil = Image.fromarray(image)
+
+    return transform(image_pil) if transform else image_pil
+
+
+def load_nifti_mask(path, transform=None):
+    lower = path.lower()
+
+    # ---------------------------
+    # Case 1: PNG mask
+    # ---------------------------
+    if lower.endswith(('.png', '.jpg', '.jpeg')):
+        mask_pil = Image.open(path).convert("L")
+        mask_tensor = transforms.ToTensor()(mask_pil)
+        mask_tensor = torch.where(mask_tensor >= 0.1, 1.0, 0.0)
+
+        if transform:
+            mask_pil = transforms.ToPILImage()(mask_tensor)
+            mask_tensor = transform(mask_pil)
+            mask_tensor = torch.where(mask_tensor >= 0.1, 1.0, 0.0)
+
+        return mask_tensor
+
+    # ---------------------------
+    # Case 2: NIfTI mask
+    # ---------------------------
+    nifti_mask = nib.load(path)
+    mask = nifti_mask.get_fdata()
+
+    if mask.shape != (224, 224):
+        raise ValueError(f"Unsupported mask shape: {mask.shape}. Expected (224, 224)")
+
+    mask = (mask - np.min(mask)) / (np.max(mask) - np.min(mask) + 1e-8) * 255
+    mask = mask.astype(np.uint8)
+    mask_pil = Image.fromarray(mask).convert('L')
+
+    mask_tensor = transforms.ToTensor()(mask_pil)
+    mask_tensor = torch.where(mask_tensor >= 0.1, 1.0, 0.0)
+
+    if transform:
+        mask_pil = transforms.ToPILImage()(mask_tensor)
+        mask_tensor = transform(mask_pil)
+        mask_tensor = torch.where(mask_tensor >= 0.1, 1.0, 0.0)
+
+    return mask_tensor
+
+
+def _find_mask_path(mask_dir, fname):
+    direct = os.path.join(mask_dir, fname)
+    if os.path.exists(direct):
+        return direct
+
+    stem = fname
+    if stem.endswith(".nii.gz"):
+        stem = stem[:-7]
+    else:
+        stem = os.path.splitext(stem)[0]
+
+    candidates = [
+        os.path.join(mask_dir, stem + ".png"),
+        os.path.join(mask_dir, stem + ".jpg"),
+        os.path.join(mask_dir, stem + ".jpeg"),
+        os.path.join(mask_dir, stem + ".nii.gz"),
+        os.path.join(mask_dir, stem + ".nii"),
+    ]
+
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+
+    raise FileNotFoundError(f"Mask not found for abnormal sample: {fname}")
 
 
 class TrainDataset(data.Dataset):
-    r""" 
-    RESC: 4,297 samples
-    OCT2017: 26,315 samples
-    """
-
-    def __init__(self, data, transform=None, data_root=None):
+    def __init__(self, data_root, transform=None):
+        self.data_root = _resolve_base_root(data_root)
         self.transform = transform
-        self.data = data
 
-        if self.data == 'RESC':
-            self.data_root = '/home/jinan/Datasets/Medical-datasets/RESC/Train/train/good/'
-        elif self.data == 'OCT2017':
-            self.data_root = '/home/jinan/Datasets/Medical-datasets/OCT2017/train/good/'
-        elif self.data == 'liver':
-            self.data_root = '/home/jinan/Datasets/Medical-datasets/Liver/Train/hist_DIY/train/good/'
-        elif self.data == 'bras2021':
-            self.data_root = '/home/jinan/Datasets/Medical-datasets/Brain/train/good/'
-        elif self.data == 'chest':
-            self.data_root = '/home/jinan/Datasets/Medical-datasets/chest-rsna/Chest-RSNA/train/good/'
-        elif self.data == 'camelyon':
-            self.data_root = '/home/jinan/Datasets/Medical-datasets/camelyon16_256/train/good/'
-        elif self.data == 'custom':
-            self.data_root = os.path.join(data_root, 'train', 'good') + '/'
-        self.data_list = os.listdir(self.data_root)
-                
-    def load_image(self, path):
-        image = Image.open(path).convert('RGB')
+        self.train_root = _first_existing_dir(
+            os.path.join(self.data_root, "train", "good", "img"),
+            os.path.join(self.data_root, "train", "good"),
+        )
 
-        if self.transform is not None:
-            image = self.transform(image)
-        return image
+        self.data_list = _list_supported_files(self.train_root)
 
     def __getitem__(self, idx):
-        img_path = self.data_root + self.data_list[idx]
-        img = self.load_image(img_path)
-        sample = {'image': img}
-
-        return sample
+        img_path = os.path.join(self.train_root, self.data_list[idx])
+        img = load_nifti_image(img_path, self.transform)
+        return {"image": img}
 
     def __len__(self):
-       return len(self.data_list)
+        return len(self.data_list)
+
 
 class ValidDataset(data.Dataset):
-    r"""
-    RESC: 115 samples (45 normal, 70 abnormal)
-    custom: any dataset with valid/good/img and valid/Ungood/img layout
-    """
-
-    def __init__(self, data, transform=None, data_root=None):
+    def __init__(self, data_root, transform=None):
+        self.data_root = _resolve_base_root(data_root)
         self.transform = transform
-        self.data = data
+        self.mask_transform = transforms.Compose([
+            transforms.Resize((32, 32)),
+            transforms.ToTensor()
+        ])
 
-        if self.data == 'RESC':
-            self.good = '/home/jinan/Datasets/Medical-datasets/RESC/Val/val/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/RESC/Val/val/Ungood/'
-            self.mask = '/home/jinan/Datasets/Medical-datasets/RESC/Val/val_label/Ungood/'
-        elif self.data == 'OCT2017':
-            self.good = '/home/jinan/Datasets/Medical-datasets/OCT2017/val/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/OCT2017/val/Ungood/'
-        elif self.data == 'liver':
-            self.good = '/home/jinan/Datasets/Medical-datasets/Liver/Train/hist_DIY/valid/img/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/Liver/Train/hist_DIY/valid/img/Ungood/'
-            self.mask = '/home/jinan/Datasets/Medical-datasets/Liver/Train/hist_DIY/valid/label/Ungood/'
-        elif self.data == 'bras2021':
-            self.good = '/home/jinan/Datasets/Medical-datasets/Brain/valid/good/img/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/Brain/valid/Ungood/img/'
-            self.mask = '/home/jinan/Datasets/Medical-datasets/Brain/valid/Ungood/label/'
-        elif self.data == 'chest':
-            self.good = '/home/jinan/Datasets/Medical-datasets/chest-rsna/Chest-RSNA/val/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/chest-rsna/Chest-RSNA/val/Ungood/'
-        elif self.data == 'camelyon':
-            self.good = '/home/jinan/Datasets/Medical-datasets/camelyon16_256/valid/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/camelyon16_256/valid/Ungood/'
-        elif self.data == 'custom':
-            self.good = os.path.join(data_root, 'valid', 'good', 'img') + '/'
-            self.ungood = os.path.join(data_root, 'valid', 'Ungood', 'img') + '/'
-            self.mask = os.path.join(data_root, 'valid', 'Ungood', 'label') + '/'
-        self.good_list = os.listdir(self.good)
-        self.ungood_list = os.listdir(self.ungood)
-                
-    def load_image(self, path):
-        image = Image.open(path).convert('RGB')
+        self.good = _first_existing_dir(
+            os.path.join(self.data_root, "valid", "good", "img"),
+            os.path.join(self.data_root, "valid", "good"),
+        )
+        self.ungood = _first_existing_dir(
+            os.path.join(self.data_root, "valid", "Ungood", "img"),
+            os.path.join(self.data_root, "valid", "Ungood"),
+        )
+        self.mask = os.path.join(self.data_root, "valid", "Ungood", "label")
 
-        if self.transform is not None:
-            image = self.transform(image)
-        return image
+        self.good_list = _list_supported_files(self.good)
+        self.ungood_list = _list_supported_files(self.ungood)
 
     def __getitem__(self, idx):
         if idx < len(self.ungood_list):
-            img_path = self.ungood + self.ungood_list[idx]
-            img = self.load_image(img_path)
-            if self.data == 'OCT2017' or self.data == 'chest' or self.data == 'camelyon':
-                mask = torch.zeros(1,32,32)
+            fname = self.ungood_list[idx]
+            img_path = os.path.join(self.ungood, fname)
+            img = load_nifti_image(img_path, self.transform)
+
+            if os.path.isdir(self.mask):
+                mask_path = _find_mask_path(self.mask, fname)
+                mask = load_nifti_mask(mask_path, self.mask_transform)
             else:
-                mask_path = self.mask + self.ungood_list[idx]
-                mask_transform = transforms.Compose([
-                    transforms.Resize((32,32)),
-                    transforms.ToTensor(),
-                    #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                ])
-                mask = mask_transform(Image.open(mask_path).convert('L'))
-                mask[mask>=0.1] = 1
-                mask[mask<0.1] = 0
+                mask = torch.zeros(1, 32, 32)
+
             label = 1
         else:
-            img_path = self.good + self.good_list[idx-len(self.ungood_list)]
-            img = self.load_image(img_path)
-            mask = torch.zeros(1,32,32)
+            fname = self.good_list[idx - len(self.ungood_list)]
+            img_path = os.path.join(self.good, fname)
+            img = load_nifti_image(img_path, self.transform)
+            mask = torch.zeros(1, 32, 32)
             label = 0
-        
-        sample = {'image': img, 'mask': mask, 'label': label, 'path': str(img_path)}
 
-        return sample
+        return {"image": img, "mask": mask, "label": label, "path": str(img_path)}
 
     def __len__(self):
-       return len(self.good_list) + len(self.ungood_list)
+        return len(self.good_list) + len(self.ungood_list)
 
 
 class TestDataset(data.Dataset):
-    r"""
-    RESC: 1805 samples (1041 normal, 764 abnormal)
-    custom: uses valid split (same as ValidDataset) since we have no separate test set
-    """
-
-    def __init__(self, data, transform=None, data_root=None):
+    def __init__(self, data_root, transform=None):
+        self.data_root = _resolve_base_root(data_root)
         self.transform = transform
-        self.data = data
+        self.mask_transform = transforms.Compose([
+            transforms.Resize((32, 32)),
+            transforms.ToTensor()
+        ])
 
-        if self.data == 'RESC':
-            self.good = '/home/jinan/Datasets/gragh_resc/'
-            self.ungood = '/home/jinan/Datasets/gragh_resc/'
-            self.mask = '/home/jinan/Datasets/gragh_resc/'
-        elif self.data == 'OCT2017':
-            self.good = '/home/jinan/Datasets/Medical-datasets/OCT2017/test/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/OCT2017/test/Ungood/'
-        elif self.data == 'liver':
-            self.good = '/home/jinan/Datasets/graph_img/'
-            self.ungood = '/home/jinan/Datasets/graph_img/'
-            self.mask = '/home/jinan/Datasets/graph_img/'
-        elif self.data == 'bras2021':
-            self.good = '/home/jinan/Datasets/graph_img_brain/'
-            self.ungood = '/home/jinan/Datasets/graph_img_brain/'
-            self.mask = '/home/jinan/Datasets/graph_img_brain/'
-        elif self.data == 'chest':
-            self.good = '/home/jinan/Datasets/Medical-datasets/chest-rsna/Chest-RSNA/test/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/chest-rsna/Chest-RSNA/test/Ungood/'
-        elif self.data == 'camelyon':
-            self.good = '/home/jinan/Datasets/Medical-datasets/camelyon16_256/test/good/'
-            self.ungood = '/home/jinan/Datasets/Medical-datasets/camelyon16_256/test/Ungood/'
-        elif self.data == 'custom':
-            self.good = os.path.join(data_root, 'valid', 'good', 'img') + '/'
-            self.ungood = os.path.join(data_root, 'valid', 'Ungood', 'img') + '/'
-            self.mask = os.path.join(data_root, 'valid', 'Ungood', 'label') + '/'
-        self.good_list = os.listdir(self.good)
-        self.ungood_list = os.listdir(self.ungood)
-                
-    def load_image(self, path):
-        image = Image.open(path).convert('RGB')
+        self.good = _first_existing_dir(
+            os.path.join(self.data_root, "test", "good", "img"),
+            os.path.join(self.data_root, "test", "good"),
+        )
+        self.ungood = _first_existing_dir(
+            os.path.join(self.data_root, "test", "Ungood", "img"),
+            os.path.join(self.data_root, "test", "Ungood"),
+        )
+        self.mask = os.path.join(self.data_root, "test", "Ungood", "label")
 
-        if self.transform is not None:
-            image = self.transform(image)
-        return image
+        self.good_list = _list_supported_files(self.good)
+        self.ungood_list = _list_supported_files(self.ungood)
 
     def __getitem__(self, idx):
         if idx < len(self.ungood_list):
-            img_path = self.ungood + self.ungood_list[idx]
-            img = self.load_image(img_path)
-            if self.data == 'OCT2017' or self.data == 'chest' or self.data == 'camelyon':
-                mask = torch.zeros(1,32,32)
+            fname = self.ungood_list[idx]
+            img_path = os.path.join(self.ungood, fname)
+            img = load_nifti_image(img_path, self.transform)
+
+            if os.path.isdir(self.mask):
+                mask_path = _find_mask_path(self.mask, fname)
+                mask = load_nifti_mask(mask_path, self.mask_transform)
             else:
-                mask_path = self.mask + self.ungood_list[idx]
-                mask_transform = transforms.Compose([
-                    transforms.Resize((32,32)),
-                    transforms.ToTensor(),
-                    #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                ])
-                mask = mask_transform(Image.open(mask_path).convert('L'))
-                mask[mask>=0.1] = 1
-                mask[mask<0.1] = 0
+                mask = torch.zeros(1, 32, 32)
+
             label = 1
         else:
-            img_path = self.good + self.good_list[idx-len(self.ungood_list)]
-            img = self.load_image(img_path)
-            mask = torch.zeros(1,32,32)
+            fname = self.good_list[idx - len(self.ungood_list)]
+            img_path = os.path.join(self.good, fname)
+            img = load_nifti_image(img_path, self.transform)
+            mask = torch.zeros(1, 32, 32)
             label = 0
-        #print(img_path)
-        sample = {'image': img, 'mask': mask, 'label': label, 'path': str(img_path)}
 
-        return sample
+        return {"image": img, "mask": mask, "label": label, "path": str(img_path)}
 
     def __len__(self):
-       return len(self.good_list) + len(self.ungood_list)
+        return len(self.good_list) + len(self.ungood_list)

@@ -245,20 +245,19 @@ def _train_standalone(cfg, data_root: str, output_dir: str, model_name: str) -> 
     os.makedirs(output_dir, exist_ok=True)
 
     if model_name == "deepsvdd":
-        svdd_config = str(here / "config" / "custom_DeepSVDD.yaml")
+        svdd_config = str(here / "config" / "deepsvdd.yaml")
         cmd = [
             sys.executable,
             str(here / "Deep-SVDD" / "main.py"),
-            "custom",                 # dataset_name
-            "cifar10_LeNet",          # net_name (ignored; uses ResNet18 encoder in data)
+            "custom",                 # dataset tag only; actual data loading uses data_root
+            "cifar10_LeNet",          # network name actually used by deep_SVDD.set_network(...)
             output_dir,               # xp_path
             data_root,                # data_path
             "--config_path", svdd_config,
             "--device", device,
-            "--pretrain", "False",
         ]
     else:  # cutpaste
-        cp_config = str(here / "config" / "custom_cutpaste.yaml")
+        cp_config = str(here / "config" / "cutpaste.yaml")
         cmd = [
             sys.executable,
             str(here / "pytorch-cutpaste" / "run_training.py"),

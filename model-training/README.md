@@ -130,8 +130,6 @@ MROOD-TRAIN/
 ├── config/
 │   ├── cfa.yaml
 │   ├── cflow.yaml
-│   ├── custom_cutpaste.yaml  # BMAD-format config used by pytorch-cutpaste/run_training.py
-│   ├── custom_DeepSVDD.yaml  # BMAD-format config used by Deep-SVDD/main.py
 │   ├── cutpaste.yaml
 │   ├── deepsvdd.yaml
 │   ├── dinomaly.yaml
@@ -148,6 +146,6 @@ MROOD-TRAIN/
 │   └── radimagenet_utils.py  # RadImageNet weight loading
 ├── data/
 │   └── dataset_conversion.py # NIfTI → PNG conversion
-├── Deep-SVDD/                # BMAD Deep-SVDD implementation (copied from BMAD/Deep-SVDD/)
-└── pytorch-cutpaste/         # BMAD CutPaste implementation (copied from BMAD/pytorch-cutpaste/)
+├── Deep-SVDD/                # setup + training
+└── pytorch-cutpaste/         # setup + training
 ```
