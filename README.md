@@ -222,42 +222,49 @@ Key packages: `anomalib==2.2.0`, `torch==2.6.0`, `nibabel==5.3.2`, `opencv-pytho
 
 ## Citations
 
-This project builds on several open-source libraries and datasets. If you use this code, please also cite the following:
+This project relies on several open-source tools and public datasets. Please cite them if you use this code.
 
-### Anomalib (Library)
+### Anomalib
+
+All models (except DeepSVDD and CutPaste) are trained and evaluated through [Anomalib](https://github.com/openvinotoolkit/anomalib).
 
 ```bibtex
 @inproceedings{akcay2022anomalib,
   title        = {Anomalib: A Deep Learning Library for Anomaly Detection},
-  author       = {Akcay, Samet and Ameln, Dick and Vaidya, Ashwin and Lakshmanan, Barath and Ahber, Nilesh and Pham, Thang},
+  author       = {Akcay, Samet and Ameln, Dick and Vaidya, Ashwin and
+                  Lakshmanan, Barath and Ahuja, Nilesh and Genc, Utku},
   booktitle    = {2022 IEEE International Conference on Image Processing (ICIP)},
   pages        = {1706--1710},
   year         = {2022},
-  organization = {IEEE},
-  doi          = {10.1109/ICIP46576.2022.9897283}
+  organization = {IEEE}
 }
 ```
 
-### BMAD — Benchmarks for Medical Anomaly Detection (Paper)
+### BMAD
+
+The DeepSVDD and CutPaste implementations are adapted from the [BMAD](https://github.com/DorisBao/BMAD) benchmark suite, whose taxonomy also guided our model selection.
 
 ```bibtex
-@inproceedings{bao2024bmad,
-  title     = {{BMAD}: Benchmarks for Medical Anomaly Detection},
-  author    = {Bao, Jinan and Ni, Hanshi and Mu, Guang and Wan, Dingwen and Lin, Yue and Dong, Qiuye and Liang, Juncheng and Wei, Dong and Li, Zhiwei and Wu, Yefeng and others},
-  booktitle = {Medical Image Computing and Computer Assisted Intervention -- MICCAI 2024},
-  pages     = {559--569},
-  year      = {2024},
-  publisher = {Springer},
-  doi       = {10.1007/978-3-031-72120-5_52}
+@article{bao2023bmad,
+  title   = {{BMAD}: Benchmarks for Medical Anomaly Detection},
+  author  = {Bao, Jinan and Sun, Hanshi and Deng, Hanqiu and
+             He, Yinsheng and Zhang, Zhaoxiang and Li, Xingyu},
+  journal = {arXiv preprint arXiv:2306.11876},
+  year    = {2023}
 }
 ```
 
-### RadImageNet (Paper)
+### RadImageNet
+
+Experiment 3 uses [RadImageNet](https://github.com/BMEII-AI/RadImageNet) pretrained weights as a domain-specific backbone replacement for FastFlow.
 
 ```bibtex
 @article{mei2022radimagenet,
   title   = {{RadImageNet}: An Open Radiologic Deep Learning Research Dataset for Effective Transfer Learning},
-  author  = {Mei, Xueyan and Liu, Zelong and Robber, Philip M. and Lawless, Hayit and Favaro, Isabella M. and Cai, Lu and Pham, Chendi and Hakber, Hoa and Dong, Shumin and Cundiff, Richard K. and others},
+  author  = {Mei, Xueyan and Liu, Zelong and Robson, Philip M. and Marinelli, Brett and
+             Huang, Mingqian and Doshi, Amish and Jacobi, Adam and Cao, Chendi and
+             Link, Katherine E. and Yang, Thomas and Wang, Ying and Greenspan, Hayit and
+             Deyer, Timothy and Fayad, Zahi A. and Yang, Yang},
   journal = {Radiology: Artificial Intelligence},
   volume  = {4},
   number  = {5},
@@ -267,13 +274,20 @@ This project builds on several open-source libraries and datasets. If you use th
 }
 ```
 
-### SynthRAD2023 Grand Challenge (Dataset)
+### SynthRAD2023
+
+All experiments use the pelvis subset of the [SynthRAD2023](https://synthrad2023.grand-challenge.org/) challenge dataset.
 
 ```bibtex
 @article{thummerer2023synthrad,
-  title   = {{SynthRAD2023} Grand Challenge dataset: generating synthetic {CT} for radiotherapy},
-  author  = {Thummerer, Adrian and van der Bijl, Erik and"; Gao, Yingqian and Langendijk, Johannes A. and Maspero, Matteo and Teuwen, Jonas and Verhoeff, Joost J.C.},
+  title   = {{SynthRAD2023} Grand Challenge dataset: Generating synthetic {CT} for radiotherapy},
+  author  = {Thummerer, Adrian and van der Bijl, Erik and Galapon Jr, Aubin and
+             Verhoeff, Joost J.C. and Langendijk, Johannes A. and Both, Stefan and
+             van den Berg, Cornelis A.T. and Maspero, Matteo},
   journal = {Medical Physics},
+  volume  = {50},
+  number  = {7},
+  pages   = {4664--4674},
   year    = {2023},
   doi     = {10.1002/mp.16529}
 }
