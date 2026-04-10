@@ -217,3 +217,64 @@ pip install -r post-processing/requirements.txt
 ```
 
 Key packages: `anomalib==2.2.0`, `torch==2.6.0`, `nibabel==5.3.2`, `opencv-python==4.8.1.78`, `scipy==1.10.1`, `scikit-learn`.
+
+---
+
+## Citations
+
+This project builds on several open-source libraries and datasets. If you use this code, please also cite the following:
+
+### Anomalib (Library)
+
+```bibtex
+@inproceedings{akcay2022anomalib,
+  title        = {Anomalib: A Deep Learning Library for Anomaly Detection},
+  author       = {Akcay, Samet and Ameln, Dick and Vaidya, Ashwin and Lakshmanan, Barath and Ahber, Nilesh and Pham, Thang},
+  booktitle    = {2022 IEEE International Conference on Image Processing (ICIP)},
+  pages        = {1706--1710},
+  year         = {2022},
+  organization = {IEEE},
+  doi          = {10.1109/ICIP46576.2022.9897283}
+}
+```
+
+### BMAD — Benchmarks for Medical Anomaly Detection (Paper)
+
+```bibtex
+@inproceedings{bao2024bmad,
+  title     = {{BMAD}: Benchmarks for Medical Anomaly Detection},
+  author    = {Bao, Jinan and Ni, Hanshi and Mu, Guang and Wan, Dingwen and Lin, Yue and Dong, Qiuye and Liang, Juncheng and Wei, Dong and Li, Zhiwei and Wu, Yefeng and others},
+  booktitle = {Medical Image Computing and Computer Assisted Intervention -- MICCAI 2024},
+  pages     = {559--569},
+  year      = {2024},
+  publisher = {Springer},
+  doi       = {10.1007/978-3-031-72120-5_52}
+}
+```
+
+### RadImageNet (Paper)
+
+```bibtex
+@article{mei2022radimagenet,
+  title   = {{RadImageNet}: An Open Radiologic Deep Learning Research Dataset for Effective Transfer Learning},
+  author  = {Mei, Xueyan and Liu, Zelong and Robber, Philip M. and Lawless, Hayit and Favaro, Isabella M. and Cai, Lu and Pham, Chendi and Hakber, Hoa and Dong, Shumin and Cundiff, Richard K. and others},
+  journal = {Radiology: Artificial Intelligence},
+  volume  = {4},
+  number  = {5},
+  pages   = {e210315},
+  year    = {2022},
+  doi     = {10.1148/ryai.210315}
+}
+```
+
+### SynthRAD2023 Grand Challenge (Dataset)
+
+```bibtex
+@article{thummerer2023synthrad,
+  title   = {{SynthRAD2023} Grand Challenge dataset: generating synthetic {CT} for radiotherapy},
+  author  = {Thummerer, Adrian and van der Bijl, Erik and"; Gao, Yingqian and Langendijk, Johannes A. and Maspero, Matteo and Teuwen, Jonas and Verhoeff, Joost J.C.},
+  journal = {Medical Physics},
+  year    = {2023},
+  doi     = {10.1002/mp.16529}
+}
+```
