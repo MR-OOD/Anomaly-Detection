@@ -215,9 +215,6 @@ Post-Processing-Pipeline/
 ├── results/                                # Report figures
 │   └── image.png                           # Pipeline overview diagram
 │
-├── old_code/
-│   └── apply_morpho.py                     # Legacy standalone batch apply (superseded by main_pipeline.py)
-│
 ├── requirements.txt
 └── README.md
 ```
