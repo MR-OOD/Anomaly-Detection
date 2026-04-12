@@ -206,12 +206,6 @@ post_processing/
 │   ├── tune_morpho.py                      # Tuning entrypoint
 │   └── README.md                           # Detailed morphology documentation
 │
-├── visualization/                          # Report and presentation figures
-│   ├── visualize_processed_anomaly_maps.py
-│   ├── visualize_processed_prediction_masks.py
-│   ├── visualize_anomaly_thresholded_outputs.py
-│   └── convert_to_bone_colormap.py
-│
 ├── config/
 │   └── morpho_val.yaml                     # Morphology tuning configuration
 │
