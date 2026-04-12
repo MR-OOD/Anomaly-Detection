@@ -33,7 +33,7 @@ The full project pipeline spans four modules, from raw MR/CT volumes to final ev
 | :--- | :--- | :--- |
 | **1 — Preprocessing** | [`data-preprocessing/`](data-preprocessing/README.md) | Converts 3D MR/CT NIfTI volumes into normalised 2D slices (PNG or NIfTI). Generates binary anomaly labels via CT Hounsfield-Unit thresholding refined by the MR signal, and exports body masks for downstream filtering. |
 | **2 — Training** | [`model-training/`](model-training/README.md) | Unified training and feature-extraction pipeline for ten anomaly detection model families: Normalizing Flow (FastFlow, CFlow), Knowledge Distillation (RD4AD, STFPM), Memory Bank (PatchCore, CFA), One-Class (DeepSVDD, CutPaste), and Reconstruction (DRAEM, Dinomaly). All models were trained following the environment and run commands documented in [`SETUP.md`](model-training/SETUP.md). |
-| **3 — Post-Processing** | [`post-processing/`](post-processing/README.md) | Refines raw binary prediction masks through body masking, morphological closing, and a 3D volumetric persistence filter. Computes pixel-, slice-, and patient-level evaluation metrics. |
+| **3 — Post-Processing** | [`post_processing/`](post_processing/README.md) | Refines raw binary prediction masks through body masking, morphological closing, and a 3D volumetric persistence filter. Computes pixel-, slice-, and patient-level evaluation metrics. |
 | **4 — Visualization** | [`visualizations/`](visualizations/README.md) | Jupyter notebooks and scripts for dataset statistics, NIfTI channel diagnostics, mask refinement analysis, and standardised side-by-side model prediction comparisons. |
 
 ---
@@ -65,7 +65,7 @@ MR-OOD-Anomaly-Detection/
 │   ├── Deep-SVDD/               # BMAD Deep-SVDD implementation
 │   └── pytorch-cutpaste/        # BMAD CutPaste implementation
 │
-├── post-processing/             # Stage 3: Refine masks + evaluate
+├── post_processing/             # Stage 3: Refine masks + evaluate
 │   ├── README.md
 │   ├── main_pipeline.py         # End-to-end pipeline entry point
 │   ├── apply_bodymask.py        # Body mask application
@@ -134,14 +134,14 @@ python model-training/extract.py --config model-training/config/fastflow.yaml \
 ### 4. Post-process and evaluate
 
 ```bash
-python post-processing/main_pipeline.py \
+python post_processing/main_pipeline.py \
   --input-dir /path/to/extract_out/prediction_masks/test \
   --body-mask-dir /path/to/dataset \
   --output-root post_process_outputs \
   --ground-truth-dir /path/to/dataset/test
 ```
 
-Metrics are written to `post_process_outputs/metrics/metrics_summary.json`. See [`post-processing/README.md`](post-processing/README.md) for morphology tuning and 3D volume inspection.
+Metrics are written to `post_process_outputs/metrics/metrics_summary.json`. See [`post_processing/README.md`](post_processing/README.md) for morphology tuning and 3D volume inspection.
 
 ### 5. Visualize results
 
@@ -219,7 +219,7 @@ pip install -r model-training/requirements-all.txt \
   --extra-index-url https://download.pytorch.org/whl/cu124
 
 # Post-processing environment
-pip install -r post-processing/requirements.txt
+pip install -r post_processing/requirements.txt
 ```
 
 Key packages: `anomalib==2.2.0`, `torch==2.6.0`, `nibabel==5.3.2`, `opencv-python==4.8.1.78`, `scipy==1.10.1`, `scikit-learn`.

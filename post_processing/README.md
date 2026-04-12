@@ -1,6 +1,6 @@
 # Post-Processing Pipeline — MR-OOD Anomaly Detection
 
-Post-processing and evaluation for binary anomaly prediction masks produced by the detection models (FastFlow, CFlow). Takes raw prediction masks and body masks as input, applies body masking, morphological filtering, and a 3D persistence filter, then computes pixel-, slice-, and patient-level metrics.
+Post-processing and evaluation for binary anomaly prediction masks produced by the anomaly detection models. Takes raw prediction masks and body masks as input, applies body masking, morphological filtering, and a 3D persistence filter, then computes pixel-, slice-, and patient-level metrics.
 
 ![Post-Processing Pipeline](results/image.png)
 
@@ -164,7 +164,7 @@ Results are saved to `reports/morphology_tuning/tuning_report.json`.
 
 ## Visualization
 
-Scripts in `visualization/` can be run directly from that folder (they add the repo root to the Python path automatically).
+Visualization scripts live in the top-level [`visualizations/`](../visualizations/README.md) module. Key scripts for inspecting post-processing outputs:
 
 | Script | Output |
 | :--- | :--- |
@@ -173,10 +173,10 @@ Scripts in `visualization/` can be run directly from that folder (they add the r
 | **`visualize_anomaly_thresholded_outputs.py`** | Anomaly map next to its thresholded binary output |
 | **`convert_to_bone_colormap.py`** | Convert NIfTI slices to bone-colormap PNGs for inspection |
 
-Example:
+Example (run from the repo root):
 
 ```bash
-python visualization/visualize_processed_prediction_masks.py \
+python visualizations/visualize_processed_prediction_masks.py \
   --raw-dir /path/to/prediction_masks/test \
   --masked-dir post_process_outputs/01_body_masked_png \
   --image-dir /path/to/dataset \
@@ -189,7 +189,7 @@ python visualization/visualize_processed_prediction_masks.py \
 ## Repository Structure
 
 ```
-Post-Processing-Pipeline/
+post_processing/
 │
 ├── main_pipeline.py                        # End-to-end pipeline entrypoint
 ├── apply_bodymask.py                       # Stage 1: body mask application
